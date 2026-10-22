@@ -195,9 +195,10 @@ is pure and fixture-tested.
 - An optional UI-vocabulary corrector repairs a token that is one edit from a
   known menu word (`Gack` → `Back`), or two edits when an adjacent token makes a
   known phrase (`bane Menu` → `Game Menu`, `Fieport Bugs` → `Report Bugs`).
-  It runs only on a line that already contains an exact UI word, so a German
-  line (`Musik`, `Menü`, `Optionen`) is never rewritten into English
-  look-alikes. Tokens shorter than four letters, punctuation-bearing tokens and
+  It runs only on a line that already contains an unambiguous English UI word
+  (`OK`, `Sound`, `Video`, `Feedback`, `Credits` and `Mods` are also German and
+  do not count), so a German line (`Musik`, `Menü`, `Optionen`) is never
+  rewritten into English look-alikes. Tokens shorter than four letters, punctuation-bearing tokens and
   vocabulary words are never touched, so `zu` in a German menu stays `zu`.
   Every repair is logged in `report.txt` (`corrected: 'Gack' -> 'Back' (1 edit)`);
   `COSMIC_SCREENSHOT_OCR_SPELLFIX=0` turns it off.
