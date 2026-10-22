@@ -11,9 +11,10 @@ use serde::{Deserialize, Serialize};
 
 use crate::{Batch, Lang, Provider, TranslateError, Translated, Translator, plan_chunks};
 
-/// Free-tier endpoint. Keys ending in `:fx` only work here.
+/// Legacy free-tier endpoint. DeepL no longer offers a free plan; the variant
+/// stays so an old `DEEPL_HOST=free` still resolves, but it is never the default.
 pub const FREE_HOST: &str = "https://api-free.deepl.com";
-/// Paid (DeepL API Pro) endpoint.
+/// Paid (DeepL API) endpoint — the default.
 pub const PAID_HOST: &str = "https://api.deepl.com";
 
 pub const KEY_VARIABLE: &str = "DEEPL_API_KEY";
@@ -22,11 +23,13 @@ const TIMEOUT_VARIABLE: &str = "DEEPL_TIMEOUT_SECS";
 const DEFAULT_TIMEOUT_SECS: u64 = 30;
 
 /// Which DeepL endpoint to talk to. Getting this wrong is a 403, so it is
-/// explicit configuration, never inferred from the key.
+/// explicit configuration, never inferred from the key. DeepL has no free tier
+/// any more, so the paid endpoint is the default.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub enum DeepLHost {
-    #[default]
+    /// Legacy free-plan endpoint, only for accounts that still have one.
     Free,
+    #[default]
     Paid,
     Custom(String),
 }
@@ -40,16 +43,16 @@ impl DeepLHost {
         }
     }
 
-    /// `DEEPL_HOST` accepts `free`, `paid`, a bare hostname, or a full base URL
-    /// (the latter matters for proxies and tests).
+    /// `DEEPL_HOST` accepts `paid` (default), `free` (legacy accounts), a bare
+    /// hostname, or a full base URL (the latter matters for proxies and tests).
     pub fn parse(value: &str) -> Result<Self, TranslateError> {
         let trimmed = value.trim().trim_end_matches('/');
         match trimmed.to_ascii_lowercase().as_str() {
-            "" | "free" | "api-free" | "api-free.deepl.com" | "https://api-free.deepl.com" => {
-                Ok(DeepLHost::Free)
-            }
-            "paid" | "pro" | "api" | "api.deepl.com" | "https://api.deepl.com" => {
+            "" | "paid" | "pro" | "api" | "api.deepl.com" | "https://api.deepl.com" => {
                 Ok(DeepLHost::Paid)
+            }
+            "free" | "api-free" | "api-free.deepl.com" | "https://api-free.deepl.com" => {
+                Ok(DeepLHost::Free)
             }
             _ if trimmed.starts_with("http://") || trimmed.starts_with("https://") => {
                 Ok(DeepLHost::Custom(trimmed.to_string()))
@@ -57,7 +60,7 @@ impl DeepLHost {
             _ => Err(TranslateError::BadConfig {
                 variable: HOST_VARIABLE,
                 value: value.to_string(),
-                hint: "use 'free', 'paid', or a full base URL such as https://api.deepl.com",
+                hint: "use 'paid' (default), 'free' (legacy), or a full base URL such as https://api.deepl.com",
             }),
         }
     }
@@ -65,7 +68,7 @@ impl DeepLHost {
     pub fn from_env() -> Result<Self, TranslateError> {
         match std::env::var(HOST_VARIABLE) {
             Ok(value) if !value.trim().is_empty() => Self::parse(&value),
-            _ => Ok(DeepLHost::Free),
+            _ => Ok(DeepLHost::default()),
         }
     }
 }
@@ -133,14 +136,9 @@ pub fn map_status(status: u16, body: &str) -> TranslateError {
         401 | 403 => TranslateError::Auth {
             status,
             detail: if detail.is_empty() {
-                "DeepL refused the key. A free-tier key only works against \
-                 api-free.deepl.com and a paid key against api.deepl.com; check DEEPL_HOST."
-                    .to_string()
+                "DeepL refused the key; check DEEPL_API_KEY and DEEPL_HOST".to_string()
             } else {
-                format!(
-                    "{detail} (a free-tier key only works against api-free.deepl.com, \
-                     a paid key against api.deepl.com; check DEEPL_HOST)"
-                )
+                format!("{detail} (check DEEPL_API_KEY and DEEPL_HOST)")
             },
         },
         456 => TranslateError::Quota {
@@ -285,27 +283,24 @@ mod tests {
     use super::*;
 
     #[test]
-    fn free_host_is_the_default() {
-        assert_eq!(DeepLHost::default(), DeepLHost::Free);
-        assert_eq!(
-            DeepLHost::default().base_url(),
-            "https://api-free.deepl.com"
-        );
-        assert!(DeepLHost::Paid.base_url().starts_with("https://api."));
+    fn the_paid_host_is_the_default() {
+        assert_eq!(DeepLHost::default(), DeepLHost::Paid);
+        assert_eq!(DeepLHost::default().base_url(), "https://api.deepl.com");
+        assert!(DeepLHost::Free.base_url().starts_with("https://api-free"));
     }
 
     #[test]
     fn host_parsing_accepts_named_hosts_and_urls() {
-        assert_eq!(DeepLHost::parse("free").unwrap(), DeepLHost::Free);
-        assert_eq!(
-            DeepLHost::parse("api-free.deepl.com").unwrap(),
-            DeepLHost::Free
-        );
+        assert_eq!(DeepLHost::parse("paid").unwrap(), DeepLHost::Paid);
+        assert_eq!(DeepLHost::parse("").unwrap(), DeepLHost::Paid);
         assert_eq!(
             DeepLHost::parse("https://api.deepl.com/").unwrap(),
             DeepLHost::Paid
         );
-        assert_eq!(DeepLHost::parse("paid").unwrap(), DeepLHost::Paid);
+        assert_eq!(
+            DeepLHost::parse("https://api-free.deepl.com").unwrap(),
+            DeepLHost::Free
+        );
         assert_eq!(
             DeepLHost::parse("http://127.0.0.1:9").unwrap(),
             DeepLHost::Custom("http://127.0.0.1:9".to_string())

@@ -2,7 +2,7 @@
 name = "cosmic-screenshot-translation"
 version = "1.11.0"
 edition = "2024"
-description = "Vendor-neutral machine translation behind a small trait (DeepL default)"
+description = "Vendor-neutral machine translation behind a small trait (local NLLB default)"
 license = "GPL-3.0-only"
 
 [dependencies]

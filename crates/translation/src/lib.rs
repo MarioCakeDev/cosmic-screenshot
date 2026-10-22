@@ -1,25 +1,30 @@
 //! Vendor-neutral machine translation.
 //!
 //! The overlay pipeline only ever talks to [`Translator`]. [`Provider`] names
-//! the engines the configuration can express; only [`Provider::DeepL`] is
-//! implemented today. Adding another provider means adding one implementation
-//! of the trait — nothing in the capture/OCR/overlay path changes.
+//! the engines the configuration can express. The default is a local NLLB-200
+//! sidecar ([`LocalTranslator`]) — purpose-built NMT, no API key, no cloud.
+//! The DeepL client is kept behind the same trait for anyone who has a paid
+//! DeepL plan. Adding another provider means adding one implementation of the
+//! trait — nothing in the capture/OCR/overlay path changes.
 
 use std::fmt;
 
 pub mod deepl;
+pub mod local;
 pub mod testing;
 
 pub use deepl::{DeepLHost, DeepLTranslator};
+pub use local::LocalTranslator;
 
-/// The engines this crate's configuration understands. DeepL is the default;
-/// the others are placeholders so the choice is expressed in one enum rather
-/// than being spread through the pipeline.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+/// The engines this crate's configuration understands. [`Provider::LocalNmt`]
+/// is the default; Google and Azure remain placeholders so the choice is
+/// expressed in one enum rather than being spread through the pipeline.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum Provider {
     DeepL,
     GoogleCloud,
     Azure,
+    #[default]
     LocalNmt,
 }
 
@@ -240,6 +245,8 @@ pub enum TranslateError {
     Quota { detail: String },
     /// Rate limited (429).
     RateLimited,
+    /// The engine is not running or cannot serve (sidecar down, model missing).
+    Unavailable { detail: String },
     /// Any other non-success status.
     Rejected { status: u16, detail: String },
     /// Could not reach the engine.
@@ -258,7 +265,7 @@ impl fmt::Display for TranslateError {
             }
             TranslateError::Unsupported { provider } => write!(
                 f,
-                "translation provider '{}' is not implemented yet; set TRANSLATE_PROVIDER=deepl",
+                "translation provider '{}' is not implemented yet; use TRANSLATE_PROVIDER=local-nmt (default) or TRANSLATE_PROVIDER=deepl",
                 provider.id()
             ),
             TranslateError::BadConfig {
@@ -280,6 +287,9 @@ impl fmt::Display for TranslateError {
             }
             TranslateError::RateLimited => {
                 f.write_str("translation engine rate limit hit (429); retry in a few seconds")
+            }
+            TranslateError::Unavailable { detail } => {
+                write!(f, "translation engine not available: {detail}")
             }
             TranslateError::Rejected { status, detail } => {
                 write!(
@@ -385,6 +395,13 @@ mod tests {
     }
 
     #[test]
+    fn the_local_engine_is_the_default() {
+        assert_eq!(Provider::default(), Provider::LocalNmt);
+        assert_eq!(Provider::default().id(), "local-nmt");
+        assert_eq!(Provider::from_id("local-nmt"), Some(Provider::default()));
+    }
+
+    #[test]
     fn not_configured_is_one_clear_line() {
         let message = TranslateError::NotConfigured {
             variable: "DEEPL_API_KEY",
@@ -393,6 +410,19 @@ mod tests {
         assert_eq!(
             message,
             "translation engine not configured: set DEEPL_API_KEY"
+        );
+        assert!(!message.contains('\n'));
+    }
+
+    #[test]
+    fn an_unavailable_engine_is_one_clear_line() {
+        let message = TranslateError::Unavailable {
+            detail: "NLLB model not found at /models/nllb".to_string(),
+        }
+        .to_string();
+        assert_eq!(
+            message,
+            "translation engine not available: NLLB model not found at /models/nllb"
         );
         assert!(!message.contains('\n'));
     }

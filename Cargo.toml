@@ -6,7 +6,7 @@ resolver = "3"
 name = "cosmic-screenshot"
 version = "1.11.0"
 edition = "2024"
-description = "Screenshot utility that translates the captured text in place (DeepL + Tesseract)"
+description = "Screenshot utility that translates the captured text in place (local NLLB + Tesseract)"
 
 [[bin]]
 name = "cosmic-screenshot-translate"

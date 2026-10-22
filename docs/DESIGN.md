@@ -8,8 +8,8 @@ nothing pushed to `pop-os`).
 1. Capture a region through the XDG desktop portal — the stock `cosmic-screenshot`
    selection UI, unchanged.
 2. OCR the captured image and keep each recognised **line** with its box.
-3. Translate every line in **one** DeepL request (batched, source language
-   auto-detected by DeepL itself).
+3. Translate every line in **one** request to a **local NLLB-200 sidecar**
+   (source language detected once per capture with fastText).
 4. Cover each original line with the sampled paper colour and draw the translation
    into the same box: lens-style, in place, not a side panel.
 5. Show the result in a preview window with a **Translate** button and a
@@ -34,7 +34,7 @@ The preview window uses `iced` with the `tiny-skia` software renderer: no GPU
 dependency, no libcosmic build (which would dominate a `target/` directory on the
 91 %-full maripop root filesystem), and it renders identically on any session.
 
-## Translation: vendor-neutral, DeepL by default
+## Translation: vendor-neutral, local NLLB-200 by default
 
 `crates/translation` exposes the only interface the pipeline knows:
 
@@ -46,30 +46,92 @@ trait Translator {
 }
 ```
 
-`Provider` is an enum over `DeepL | GoogleCloud | Azure | LocalNmt`. DeepL is
-implemented; the other variants are expressible in configuration
-(`TRANSLATE_PROVIDER`) and fail with one clear line rather than a panic. Adding a
-provider is one `impl Translator`; nothing in OCR or overlay changes.
+`Provider` is an enum over `DeepL | GoogleCloud | Azure | LocalNmt`. `LocalNmt`
+is the default: NLLB-200-distilled-600M served by a local sidecar, no API key,
+no cloud, no per-character cost. `DeepL` is kept behind the same trait for
+anyone with a paid DeepL plan; Google and Azure remain placeholders that fail
+with one clear line. Adding a provider is one `impl Translator`; nothing in OCR
+or overlay changes.
 
-### DeepL specifics
+### Why a sidecar rather than Rust bindings
+
+`ct2rs` would drag `libctranslate2` onto every target machine — worse for
+"runnable on a laptop" than a pip-installable service. The sidecar also has to
+hold the model **resident**: a cold load is 0.7–2.3 s, so a process per capture
+would add that to every screenshot.
+
+Measured on maripop (Ryzen 7 5800X, AVX2 only), NLLB-200-distilled-600M,
+CTranslate2 int8, beam 1:
+
+| Config | 25 lines / 1121 ch | 5 lines / 184 ch | RSS |
+|---|---|---|---|
+| CPU 8 threads | 0.63 s | 274 ms | 1.4 GB |
+| CPU 4 threads | – | 318 ms | 1.4 GB |
+| CPU 1 thread | 2.56 s | 887 ms | 1.4 GB |
+| GPU int8_float16 | 0.06 s | 39 ms | 1.3 GB RSS, 1.20 GB VRAM |
+
+Three consequences, all encoded in the code:
+
+1. **One request per capture.** There is a fixed ~200 ms per-call overhead; the
+   client never chunks (that is a DeepL-only limit).
+2. **Model resident** in a systemd *user* unit, started at login.
+3. **`beam_size = 1`** — beam 4 is 3× slower on CPU for a marginal gain.
+
+### Protocol
+
+| Endpoint | Body |
+|---|---|
+| `POST /translate` | `{"lines": ["…"], "target": "de", "source": "auto" \| "de"}` → `{"translations": ["…"], "source": "de", "detected": true, "unchanged": false}` |
+| `GET /health` | model path, device, compute type, thread count, language count |
+
+Canonical two-letter codes cross the wire; the NLLB token (`deu_Latn`,
+`arb_Arab`, `zho_Hans`) exists in exactly one place, the sidecar's
+`data/nllb_codes.json`. A code the model does not know is a 400, never a silent
+translation into the wrong language.
+
+### Language codes and detection
+
+- NLLB needs the **script** as part of the token: `arb_Arab` for Arabic,
+  `lvs_Latn` for Latvian, `zho_Hans`/`zho_Hant` for Chinese. Naive ISO 639-3
+  guesses are wrong for several picker languages, so the table is checked
+  against the model vocabulary **at startup** (the service refuses to run), by a
+  Python fixture test against the 202 real tokens, and by a Rust test that
+  cross-checks the 23-entry picker against the same table.
+- **Detection is new work DeepL hid:** NLLB has no detector. fastText
+  `lid.176.ftz` (917 KB) runs **once per capture on all joined lines**; per-line
+  detection is unreliable on short strings. Low confidence or an unknown label
+  falls back to English (reported as `detected: false`), and `--source-lang` /
+  the preview's **From** picker bypass detection entirely.
+- Chinese is the one language whose script fastText cannot report: it returns
+  `zh` for both, so the sidecar picks Hans/Hant from the characters themselves.
+
+### DeepL specifics (optional engine)
 
 | Concern | Decision |
 |---|---|
-| Endpoint | `https://api-free.deepl.com/v2/translate` by default; `DEEPL_HOST=paid` → `https://api.deepl.com`; any full URL also accepted (proxies/tests) |
-| Why configurable | a free-tier key against the paid host (or vice versa) is a 403 with a misleading body; the host is explicit rather than guessed |
-| Key | `DEEPL_API_KEY`, read at runtime. Never logged, never committed, redacted in `Debug`, never in a fixture |
-| Not configured | `translation engine not configured: set DEEPL_API_KEY` — one line, exit code 1, and the capture is not taken |
-| Source language | omitted from the request; DeepL returns `detected_source_language` per item, which is surfaced in the status/notification |
-| Batching | all OCR lines in one request; chunked at **50 text items** and 120 KiB per request, so a pathological capture degrades instead of failing |
-| Errors | 401/403 → credential/host hint, 456 → quota, 429 → rate limit, others → engine message; all flattened to one line (no stack traces, no multi-line bodies) |
-| Transport | `ureq` + rustls, 30 s timeout (`DEEPL_TIMEOUT_SECS`) — thin, blocking, easy to test |
+| Endpoint | `https://api.deepl.com` (paid) is the default; `DEEPL_HOST=free` is legacy only, any full URL accepted for proxies/tests |
+| Key | `DEEPL_API_KEY`, read at runtime; never logged, never committed, redacted in `Debug` |
+| Not configured | `translation engine not configured: set DEEPL_API_KEY` — one line, exit 1, no capture taken |
+| Source language | omitted from the request; DeepL's `detected_source_language` is surfaced in the status |
+| Batching | 50 items and 120 KiB per request — DeepL's limits, not NLLB's |
+| Errors | 401/403 → credential/host hint, 456 → quota, 429 → rate limit, all one line |
+| Transport | `ureq` + rustls, 30 s timeout (`DEEPL_TIMEOUT_SECS`) |
 
-The HTTP layer is deliberately two pure functions (`request_body`,
-`parse_response`) plus one `map_status`, so request shape, response parsing and
-error mapping are unit-tested against fixtures. One integration test runs the
-real client against a throwaway local TCP server to prove the wire format,
-including the 51-items-becomes-two-requests case. The real API is never called in
-tests.
+The HTTP layers are pure functions (`request_body`, `parse_response`,
+`map_status`) tested against fixtures, plus integration tests against a
+throwaway local TCP server. No real API is called in tests.
+
+### Failure shape
+
+One line, never a panic and never a silent empty overlay:
+
+```
+translation engine not available: cannot reach the local NLLB sidecar at http://127.0.0.1:8765 — start it with 'systemctl --user start cosmic-screenshot-nllb'
+translation engine not available: NLLB model not found at /home/…/nllb/model (missing model.bin, config.json)
+```
+
+The client checks `/health` **before** the portal opens, so a stopped engine
+never costs the user a region selection.
 
 ## OCR
 
@@ -121,25 +183,32 @@ package to install.
 
 ```
 src/main.rs        capture (portal), CLI flags, notify, headless --translate path
-src/gui.rs         preview window: Translate, Save, Close, language picker
+src/gui.rs         preview window: Translate, Save, Close, From/To pickers
 src/pipeline.rs    capture file → OCR → translate → overlay → PNG (shared by both)
 src/lang.rs        one table: code, display name, Tesseract pack, overlay script
-crates/translation DeepL client, batching, errors, fake translator for tests
+crates/translation local NLLB client, DeepL client, errors, fake translator for tests
 crates/ocr         tesseract runner + TSV parser
 crates/overlay     colour sampling, text fitting, in-place rendering
-examples/prototype static-image demo: real Tesseract + dictionary fake, no key
-tests/             pipeline and CLI contract (one-line errors, no output on failure)
+sidecar/           NLLB-200 + CTranslate2 + fastText service, its own tests and unit
+examples/prototype static-image demo: real Tesseract + dictionary fake, no engine
+tests/             pipeline, CLI contract, picker ↔ NLLB code cross-check
 ```
 
 ## Environment variables
 
 | Variable | Default | Meaning |
 |---|---|---|
-| `DEEPL_API_KEY` | — | required for translation; set on the machine, never in the repo |
-| `DEEPL_HOST` | `free` | `free` (`api-free.deepl.com`), `paid` (`api.deepl.com`), or a full base URL |
-| `DEEPL_TIMEOUT_SECS` | `30` | HTTP timeout |
-| `TRANSLATE_PROVIDER` | `deepl` | `deepl`; other enum values report "not implemented yet" |
+| `TRANSLATE_PROVIDER` | `local-nmt` | `local-nmt` (default) or `deepl`; other enum values report "not implemented yet" |
+| `COSMIC_SCREENSHOT_NLLB_URL` | `http://127.0.0.1:8765` | sidecar base URL |
+| `COSMIC_SCREENSHOT_NLLB_TIMEOUT_SECS` | `30` | sidecar HTTP timeout |
+| `DEEPL_API_KEY` | — | only for `TRANSLATE_PROVIDER=deepl` |
+| `DEEPL_HOST` | `paid` | `paid` (`api.deepl.com`), `free` (legacy accounts), or a full base URL |
+| `DEEPL_TIMEOUT_SECS` | `30` | DeepL HTTP timeout |
 | `COSMIC_SCREENSHOT_OCR_LANGS` | all supported packs | Tesseract `-l` list |
+
+The sidecar has its own settings (`NLLB_MODEL_DIR`, `NLLB_TOKENIZER_DIR`,
+`NLLB_FASTTEXT_MODEL`, `NLLB_DEVICE`, `NLLB_COMPUTE_TYPE`, `NLLB_THREADS`,
+`NLLB_PORT`); see [`docs/NLLB.md`](NLLB.md).
 
 ## Known limits / follow-ups
 
@@ -149,8 +218,9 @@ tests/             pipeline and CLI contract (one-line errors, no output on fail
 - One-shot overlay: translating again re-runs from the original capture (the
   translated file is never fed back in as input).
 - Copy-to-clipboard from the preview is not wired up yet; Save writes the file.
-- DeepL free tier is 500k characters/month; a screen region is usually a few
-  hundred characters, so this is thousands of captures.
+- **NLLB quality is good but literal, clearly below DeepL** ("Mit freundlichen
+  Grüßen" → "With a friendly greeting"). The engine model is 669 MB on disk and
+  about 1.4 GB RSS while resident.
 - RTL layout (Arabic) is drawn left-to-right with a font that has the glyphs;
   proper bidi shaping is a follow-up.
 - No per-block manual editing (move/resize/retype) yet.

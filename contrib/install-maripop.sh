@@ -3,9 +3,10 @@
 #
 #   ./contrib/install-maripop.sh
 #
-# Installs the OCR runtime, the fonts the overlay needs, builds the binary and
-# puts it in ~/.local/bin. It does NOT install the DeepL key and it does NOT
-# touch the stock cosmic-screenshot package.
+# Installs the OCR runtime and the fonts the overlay needs, builds the binary
+# and puts it in ~/.local/bin. It does NOT install the translation engine (run
+# contrib/install-nllb-sidecar.sh for that) and it does NOT touch the stock
+# cosmic-screenshot package.
 set -eu
 
 REPO="${REPO:-https://github.com/MarioCakeDev/cosmic-screenshot}"
@@ -36,7 +37,7 @@ if [ -d "$SOURCE_DIR/.git" ]; then
     git -C "$SOURCE_DIR" pull --ff-only
 else
     mkdir -p "$(dirname "$SOURCE_DIR")"
-    git clone "$REPO" "$SOURCE_DIR"
+    git clone -b feat/lens-translation "$REPO" "$SOURCE_DIR"
 fi
 
 echo "== building"
@@ -51,8 +52,7 @@ echo
 echo "Installed: $BIN_DIR/cosmic-screenshot-translate"
 echo "Stock cosmic-screenshot is untouched."
 echo
-echo "Next: put the key in the session environment (never in the repo), e.g."
-echo "  install -Dm600 /dev/null ~/.config/environment.d/90-deepl.conf"
-echo "  printf 'DEEPL_API_KEY=%s\\n' '<free-tier-key>' >> ~/.config/environment.d/90-deepl.conf"
-echo "then log out and back in, and verify with:"
+echo "Next: install the local NLLB-200 engine (no key, ~670 MB, systemd user unit):"
+echo "  $SOURCE_DIR/contrib/install-nllb-sidecar.sh"
+echo "then verify with:"
 echo "  cosmic-screenshot-translate --input shot.png --translate de"

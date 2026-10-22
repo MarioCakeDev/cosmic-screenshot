@@ -10,20 +10,25 @@ use cosmic_screenshot_translation::{self as translation, Lang, TranslateError, T
 
 use crate::lang;
 
-/// Environment variable that selects the engine. DeepL is the default; the
-/// other providers are accepted by the enum but not implemented yet.
+/// Environment variable that selects the engine. The local NLLB sidecar is the
+/// default; DeepL is kept for paid DeepL accounts.
 pub const PROVIDER_VARIABLE: &str = "TRANSLATE_PROVIDER";
 
 /// Build the configured translator, failing with one clear line when the
-/// engine cannot be used (missing key, unknown provider).
+/// engine cannot be used (sidecar down, missing model, missing key).
 pub fn translator_from_env() -> Result<Box<dyn Translator>, TranslateError> {
-    let requested = std::env::var(PROVIDER_VARIABLE).unwrap_or_else(|_| "deepl".to_string());
+    let requested = std::env::var(PROVIDER_VARIABLE)
+        .ok()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+        .unwrap_or_else(|| translation::Provider::default().id().to_string());
     let provider = translation::Provider::from_id(&requested).ok_or(TranslateError::BadConfig {
         variable: PROVIDER_VARIABLE,
         value: requested,
-        hint: "use 'deepl' (the other providers are not implemented yet)",
+        hint: "use 'local-nmt' (the default) or 'deepl'",
     })?;
     match provider {
+        translation::Provider::LocalNmt => Ok(Box::new(translation::LocalTranslator::from_env()?)),
         translation::Provider::DeepL => Ok(Box::new(translation::DeepLTranslator::from_env()?)),
         other => Err(TranslateError::Unsupported { provider: other }),
     }
@@ -53,6 +58,8 @@ pub struct Job {
     pub input: PathBuf,
     pub output: PathBuf,
     pub target: Lang,
+    /// Explicit source language; `None` means detect it from the capture.
+    pub source: Option<Lang>,
     pub ocr: ocr::Config,
     pub options: Options,
 }
@@ -65,6 +72,7 @@ impl Job {
             input,
             output,
             target,
+            source: None,
             ocr: ocr_config(None),
             options: Options::default(),
         }
@@ -94,7 +102,14 @@ pub struct Applied {
 pub fn run(job: &Job, translator: &dyn Translator) -> Result<Outcome, PipelineError> {
     let mut canvas = Canvas::open(&job.input).map_err(PipelineError::Overlay)?;
     let blocks = ocr::recognize(&job.input, &job.ocr).map_err(PipelineError::Ocr)?;
-    let applied = apply(&mut canvas, &blocks, job.target, translator, &job.options)?;
+    let applied = apply(
+        &mut canvas,
+        &blocks,
+        job.target,
+        job.source,
+        translator,
+        &job.options,
+    )?;
     canvas.save(&job.output).map_err(PipelineError::Overlay)?;
     Ok(Outcome {
         output: job.output.clone(),
@@ -111,6 +126,7 @@ pub fn apply(
     canvas: &mut Canvas,
     blocks: &[TextBlock],
     target: Lang,
+    source: Option<Lang>,
     translator: &dyn Translator,
     options: &Options,
 ) -> Result<Applied, PipelineError> {
@@ -119,7 +135,7 @@ pub fn apply(
     }
     let texts: Vec<&str> = blocks.iter().map(|block| block.text.as_str()).collect();
     let batch = translator
-        .translate(&texts, target, None)
+        .translate(&texts, target, source)
         .map_err(PipelineError::Translation)?;
     if batch.items.len() != blocks.len() {
         return Err(PipelineError::Translation(TranslateError::CountMismatch {

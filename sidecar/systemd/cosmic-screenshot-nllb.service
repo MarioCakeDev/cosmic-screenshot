@@ -1,0 +1,29 @@
+[Unit]
+Description=Local NLLB-200 translation sidecar for cosmic-screenshot-translate
+Documentation=https://github.com/MarioCakeDev/cosmic-screenshot/blob/feat/lens-translation/docs/NLLB.md
+After=network.target
+
+[Service]
+Type=simple
+# The model is loaded once here and stays resident: a cold load is 0.7–2.3 s.
+ExecStart=%h/.local/share/cosmic-screenshot/nllb/venv/bin/python -m nllb_sidecar
+Environment=PYTHONUNBUFFERED=1
+Environment=TRANSFORMERS_VERBOSITY=error
+# The model and tokenizer are local files; the service never needs the network.
+Environment=HF_HUB_OFFLINE=1
+# One capture's lines are translated in a single call; 8 threads measured best
+# on a Ryzen 7 5800X (0.63 s for 25 lines). Lower it to keep the desktop cool.
+Environment=NLLB_THREADS=8
+Restart=on-failure
+RestartSec=3
+# 78 = EX_CONFIG: a missing model or tokenizer must not restart-loop.
+RestartPreventExitStatus=78
+
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=-%h/.cache
+
+[Install]
+WantedBy=default.target

@@ -1,0 +1,35 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "cosmic-screenshot-nllb"
+version = "0.1.0"
+description = "Local NLLB-200 translation service for cosmic-screenshot-translate"
+requires-python = ">=3.10"
+license = { text = "GPL-3.0-only" }
+dependencies = [
+    "ctranslate2>=4.4,<5",
+    "transformers>=4.41,<5",
+    "sentencepiece>=0.2",
+    # fasttext-wheel 0.9.2 calls np.array(..., copy=False), which NumPy 2 removed;
+    # without this pin every detection raises ValueError.
+    "numpy<2",
+    "fasttext-wheel>=0.9.2",
+]
+
+[project.optional-dependencies]
+test = ["pytest>=8"]
+
+[project.scripts]
+cosmic-screenshot-nllb = "nllb_sidecar.__main__:main"
+
+[tool.setuptools]
+packages = ["nllb_sidecar"]
+
+[tool.setuptools.package-data]
+nllb_sidecar = ["data/*.json"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = ["real: needs the downloaded model/tokenizer (set NLLB_TEST_MODEL and NLLB_TEST_TOKENIZER)"]

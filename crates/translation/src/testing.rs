@@ -54,7 +54,7 @@ impl FakeTranslator {
 
 impl Translator for FakeTranslator {
     fn provider(&self) -> Provider {
-        Provider::DeepL
+        Provider::LocalNmt
     }
 
     fn translate(

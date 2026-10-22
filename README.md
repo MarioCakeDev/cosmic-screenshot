@@ -3,19 +3,22 @@
 Utility for capturing screenshots via XDG Desktop Portal.
 
 This fork adds **Lens-style translation** of the captured region: OCR the
-selection, translate it with DeepL, and paint the translation back over the
-original text.
+selection, translate it **locally with NLLB-200**, and paint the translation
+back over the original text.
 
 - Fork of [`pop-os/cosmic-screenshot`](https://github.com/pop-os/cosmic-screenshot)
   (upstream history kept).
 - Installs as a **separate binary**, `cosmic-screenshot-translate`; the stock
   `cosmic-screenshot` package is untouched.
-- Design note: [`docs/DESIGN.md`](docs/DESIGN.md).
+- Translation runs on the machine: no API key, no cloud, no per-character cost.
+  NLLB-200 is a dedicated NMT model, not an LLM — no Ollama, no prompts.
+- Design note: [`docs/DESIGN.md`](docs/DESIGN.md); engine and install detail:
+  [`docs/NLLB.md`](docs/NLLB.md).
 
 ## Use
 
 ```sh
-# select a region, then get a preview with a Translate button and language picker
+# select a region, then get a preview with a Translate button and language pickers
 cosmic-screenshot-translate
 
 # headless: select a region, translate it, print the saved path
@@ -26,6 +29,9 @@ cosmic-screenshot-translate --translate ja --interactive=false
 
 # an existing image (also handy for testing without the portal)
 cosmic-screenshot-translate --input shot.png --translate fr
+
+# tell it the source language instead of detecting it
+cosmic-screenshot-translate --input shot.png --translate en --source-lang de
 ```
 
 The translated image is written next to the capture as
@@ -36,26 +42,31 @@ translated overlay, not the original text.
 
 | Variable | Default | Meaning |
 |---|---|---|
-| `DEEPL_API_KEY` | — | DeepL key, read at runtime; never committed |
-| `DEEPL_HOST` | `free` | `free` → `api-free.deepl.com`, `paid` → `api.deepl.com`, or a full base URL |
-| `TRANSLATE_PROVIDER` | `deepl` | other engines are expressible but not implemented yet |
+| `TRANSLATE_PROVIDER` | `local-nmt` | `local-nmt` (NLLB sidecar) or `deepl` (paid plan) |
+| `COSMIC_SCREENSHOT_NLLB_URL` | `http://127.0.0.1:8765` | local sidecar base URL |
+| `COSMIC_SCREENSHOT_NLLB_TIMEOUT_SECS` | `30` | sidecar HTTP timeout |
+| `DEEPL_API_KEY` | — | only for `TRANSLATE_PROVIDER=deepl` |
+| `DEEPL_HOST` | `paid` | `paid` (`api.deepl.com`), `free` (legacy accounts), or a full URL |
 | `COSMIC_SCREENSHOT_OCR_LANGS` | all supported packs | Tesseract `-l` list |
 
-Without `DEEPL_API_KEY` the Translate button and `--translate` fail with one line:
+With the sidecar stopped, the Translate button and `--translate` fail with one
+line, before the selection UI opens:
 
 ```
-translation engine not configured: set DEEPL_API_KEY
+translation engine not available: cannot reach the local NLLB sidecar at http://127.0.0.1:8765 — start it with 'systemctl --user start cosmic-screenshot-nllb'
 ```
 
-Target and source languages: `en de fr es it pt nl pl ru uk tr cs sv da fi el hu
-ro ja zh ko ar id`. The source language is detected by DeepL; all OCR language
-packs for those languages are installed by the recipe below.
+Target languages: `en de fr es it pt nl pl ru uk tr cs sv da fi el hu ro ja zh
+ko ar id`. The **source** language is detected per capture (fastText on all OCR
+lines joined); if detection is not confident it falls back to English and says
+so. `--source-lang` overrides it, and the preview window has a **From** picker
+next to **Translate to**.
 
 ## Build on maripop
 
 ```sh
 sudo apt-get install -y --no-install-recommends \
-  tesseract-ocr tesseract-ocr-osd \
+  tesseract-ocr tesseract-ocr-osd python3 python3-venv \
   tesseract-ocr-ara tesseract-ocr-ces tesseract-ocr-chi-sim tesseract-ocr-chi-tra \
   tesseract-ocr-dan tesseract-ocr-deu tesseract-ocr-ell tesseract-ocr-eng \
   tesseract-ocr-fin tesseract-ocr-fra tesseract-ocr-hun tesseract-ocr-ind \
@@ -64,35 +75,45 @@ sudo apt-get install -y --no-install-recommends \
   tesseract-ocr-spa tesseract-ocr-swe tesseract-ocr-tur tesseract-ocr-ukr \
   fonts-dejavu-core fonts-noto-core fonts-noto-cjk
 
-git clone https://github.com/MarioCakeDev/cosmic-screenshot
-cd cosmic-screenshot
+git clone -b feat/lens-translation https://github.com/MarioCakeDev/cosmic-screenshot \
+  ~/src/cosmic-screenshot
+cd ~/src/cosmic-screenshot
 cargo build --release
 install -Dm0755 target/release/cosmic-screenshot-translate ~/.local/bin/
 ```
 
-Or run `contrib/install-maripop.sh`, which does exactly that (without the key).
-
-The key belongs in the session environment, not the repository:
+Then install the translation engine (user-local venv, ~670 MB model, systemd
+user unit):
 
 ```sh
-install -Dm600 /dev/null ~/.config/environment.d/90-deepl.conf
-printf 'DEEPL_API_KEY=%s\n' '<free-tier-key>' >> ~/.config/environment.d/90-deepl.conf
+./contrib/install-nllb-sidecar.sh
 ```
 
-Log out and back in, then verify:
+Or run `contrib/install-maripop.sh` for the binary, then the sidecar script.
+
+Verify:
 
 ```sh
+curl -s http://127.0.0.1:8765/health
 cosmic-screenshot-translate --input shot.png --translate de
 ```
 
 ## Tests
 
 ```sh
-cargo test --workspace            # 60 tests, no network, no API key
+cargo test --workspace            # 87 tests, no network, no model, no key
 cargo test --workspace --all-features
-cargo run --example prototype -- /tmp/translate-demo   # needs tesseract-ocr + eng pack
+cd sidecar && python -m pytest    # engine tests with fixtures (no model)
+
+# with the real model downloaded (proves the CTranslate2 handling):
+cd sidecar
+NLLB_TEST_MODEL=~/.local/share/cosmic-screenshot/nllb/model \
+NLLB_TEST_TOKENIZER=~/.local/share/cosmic-screenshot/nllb/tokenizer \
+python -m pytest -m real
 ```
 
-The DeepL client is tested with fixture request/response bodies and against a
-throwaway local HTTP server; the real API is never called. The `Translator` trait
-with a fake provider is the main test path for the pipeline.
+The HTTP transports are tested against a throwaway local server; no real API is
+called. The local engine's language table is checked against the model's 202
+language tokens (Python fixture test) and the 23-entry picker is cross-checked
+against the same table (Rust test). The `Translator` trait with a fake provider
+is the main pipeline test path.

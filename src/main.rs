@@ -63,6 +63,9 @@ struct Args {
     /// Target language preselected in the preview window
     #[arg(long, value_name = "LANGUAGE")]
     target_language: Option<String>,
+    /// Source language of the captured text (default: detect it)
+    #[arg(long, value_name = "LANGUAGE")]
+    source_lang: Option<String>,
     /// Never open the preview window
     #[arg(long)]
     no_gui: bool,
@@ -110,8 +113,13 @@ async fn main() -> ExitCode {
 }
 
 async fn run(args: Args) -> Result<(), String> {
-    // Resolve the target and the engine *before* taking a screenshot: a
-    // missing DEEPL_API_KEY must not cost the user a capture.
+    // Resolve the target, the source override and the engine *before* taking a
+    // screenshot: an unavailable engine must not cost the user a capture.
+    let source = match &args.source_lang {
+        Some(requested) if requested.trim().eq_ignore_ascii_case("auto") => None,
+        Some(requested) => Some(resolve_source_language(requested)?),
+        None => None,
+    };
     let translation = match &args.translate {
         Some(requested) => {
             let info = resolve_language(requested)?;
@@ -146,6 +154,7 @@ async fn run(args: Args) -> Result<(), String> {
 
     if let Some((info, translator)) = translation {
         let mut job = pipeline::Job::new(&path, lang::translation_lang(info));
+        job.source = source;
         job.ocr = pipeline::ocr_config(args.ocr_langs.clone());
         if let Some(output) = &args.output {
             job.output = output.clone();
@@ -181,6 +190,7 @@ async fn run(args: Args) -> Result<(), String> {
         let request = cosmic_screenshot::gui::Request {
             image: path.clone(),
             initial,
+            initial_source: source,
             save_dir: args.save_dir.clone(),
         };
         cosmic_screenshot::gui::run(request)
@@ -201,6 +211,17 @@ fn resolve_language(requested: &str) -> Result<&'static LangInfo, String> {
             lang::supported_list()
         )
     })
+}
+
+fn resolve_source_language(requested: &str) -> Result<cosmic_screenshot_translation::Lang, String> {
+    lang::from_argument(requested)
+        .map(lang::translation_lang)
+        .ok_or_else(|| {
+            format!(
+                "unsupported source language '{requested}'; use 'auto' or one of: {}",
+                lang::supported_list()
+            )
+        })
 }
 
 async fn capture(args: &Args) -> Result<Capture, String> {

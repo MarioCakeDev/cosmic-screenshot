@@ -2,7 +2,7 @@
 //!
 //! Draws a synthetic "screenshot" with ab_glyph, reads it with the real
 //! Tesseract (so the TSV layer is exercised end to end), translates through a
-//! dictionary fake — no DeepL key needed — and writes before/after PNGs.
+//! dictionary fake — no engine needed — and writes before/after PNGs.
 //!
 //!   cargo run --example prototype -- /tmp/translate-demo
 //!

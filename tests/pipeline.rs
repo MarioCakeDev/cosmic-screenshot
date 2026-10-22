@@ -1,5 +1,5 @@
 //! The pipeline in isolation: OCR blocks in, painted canvas out, with the fake
-//! translator standing in for DeepL.
+//! translator standing in for the real engine.
 
 use cosmic_screenshot::pipeline::{self, PipelineError};
 use cosmic_screenshot_ocr::{Bbox, TextBlock};
@@ -52,6 +52,7 @@ fn one_batched_call_covers_every_block() {
         &mut canvas,
         &blocks(),
         Lang::parse("de").unwrap(),
+        None,
         &translator,
         &Options::default(),
     )
@@ -88,6 +89,7 @@ fn empty_translation_still_covers_the_original() {
         &mut canvas,
         &blocks,
         Lang::parse("de").unwrap(),
+        None,
         &translator,
         &Options::default(),
     )
@@ -103,6 +105,7 @@ fn no_text_is_a_clear_error() {
         &mut canvas,
         &[],
         Lang::parse("de").unwrap(),
+        None,
         &FakeTranslator::echoing(),
         &Options::default(),
     )
@@ -119,6 +122,7 @@ fn an_unconfigured_engine_does_not_touch_the_canvas() {
         &mut canvas,
         &blocks(),
         Lang::parse("de").unwrap(),
+        None,
         &UnconfiguredTranslator,
         &Options::default(),
     )
@@ -135,6 +139,24 @@ fn an_unconfigured_engine_does_not_touch_the_canvas() {
 }
 
 #[test]
+fn an_explicit_source_reaches_the_engine() {
+    let mut canvas = capture();
+    let translator = FakeTranslator::new("[de] ");
+    pipeline::apply(
+        &mut canvas,
+        &blocks(),
+        Lang::parse("de").unwrap(),
+        Some(Lang::parse("en").unwrap()),
+        &translator,
+        &Options::default(),
+    )
+    .expect("pipeline succeeds");
+    let calls = translator.calls();
+    assert_eq!(calls.len(), 1);
+    assert_eq!(calls[0].source.map(Lang::code), Some("en"));
+}
+
+#[test]
 fn detects_the_target_language_from_its_code() {
     let mut canvas = capture();
     let mut translator = FakeTranslator::new("[fr] ");
@@ -143,6 +165,7 @@ fn detects_the_target_language_from_its_code() {
         &mut canvas,
         &blocks(),
         Lang::parse("fr").unwrap(),
+        None,
         &translator,
         &Options::default(),
     )

@@ -1,5 +1,5 @@
 //! Preview window: the captured region, a Translate button and the
-//! target-language picker.
+//! source/target language pickers.
 //!
 //! The area selection itself belongs to the desktop portal (it is not part of
 //! this tool), so the new button lives in this preview — the tool's own UI —
@@ -20,6 +20,8 @@ use crate::pipeline;
 pub struct Request {
     pub image: PathBuf,
     pub initial: &'static LangInfo,
+    /// Explicit source language, or `None` to let the engine detect it.
+    pub initial_source: Option<Lang>,
     pub save_dir: Option<PathBuf>,
 }
 
@@ -41,12 +43,39 @@ impl fmt::Display for Choice {
     }
 }
 
+/// The source picker: detection first, then every language the tool knows.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum SourceChoice {
+    Auto,
+    Lang(&'static LangInfo),
+}
+
+impl fmt::Display for SourceChoice {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            SourceChoice::Auto => f.write_str("Auto-detect"),
+            SourceChoice::Lang(info) => write!(f, "{} ({})", info.name, info.code),
+        }
+    }
+}
+
+impl SourceChoice {
+    fn lang(self) -> Option<Lang> {
+        match self {
+            SourceChoice::Auto => None,
+            SourceChoice::Lang(info) => Some(lang::translation_lang(info)),
+        }
+    }
+}
+
 struct App {
     image_path: PathBuf,
     displayed: image::Handle,
     translated_path: Option<PathBuf>,
     choices: Vec<Choice>,
+    sources: Vec<SourceChoice>,
     target: Choice,
+    source: SourceChoice,
     status: String,
     busy: bool,
     save_dir: Option<PathBuf>,
@@ -56,18 +85,25 @@ impl App {
     fn new(request: Request) -> Result<Self, String> {
         let canvas = Canvas::open(&request.image).map_err(|error| error.to_string())?;
         let handle = image::Handle::from_rgba(canvas.width, canvas.height, canvas.rgba);
+        let mut sources = Vec::with_capacity(lang::LANGS.len() + 1);
+        sources.push(SourceChoice::Auto);
+        sources.extend(lang::LANGS.iter().map(SourceChoice::Lang));
+        let source = request
+            .initial_source
+            .and_then(|chosen| lang::find(chosen.code()))
+            .map(SourceChoice::Lang)
+            .unwrap_or(SourceChoice::Auto);
         Ok(Self {
             image_path: request.image,
             displayed: handle,
             translated_path: None,
             choices: lang::LANGS.iter().map(Choice).collect(),
+            sources,
             target: Choice(request.initial),
-            status: if std::env::var("DEEPL_API_KEY").is_ok_and(|key| !key.trim().is_empty()) {
-                "Pick a language, then Translate.".to_string()
-            } else {
-                // Not an error yet: the button reports it in one line.
-                "translation engine not configured: set DEEPL_API_KEY".to_string()
-            },
+            source,
+            // The engine is checked by the button, so a stopped sidecar shows
+            // its one-line message here rather than in a terminal.
+            status: "Pick a language, then Translate.".to_string(),
             busy: false,
             save_dir: request.save_dir,
         })
@@ -79,6 +115,10 @@ impl App {
                 self.target = choice;
                 Task::none()
             }
+            Message::Source(choice) => {
+                self.source = choice;
+                Task::none()
+            }
             Message::Translate => {
                 if self.busy {
                     return Task::none();
@@ -88,7 +128,8 @@ impl App {
                 let input = self.image_path.clone();
                 let target = lang::translation_lang(self.target.0);
                 let language = self.target.0;
-                Task::perform(translate(input, target, language), Message::Done)
+                let source = self.source.lang();
+                Task::perform(translate(input, target, language, source), Message::Done)
             }
             Message::Save => {
                 self.save();
@@ -137,18 +178,23 @@ impl App {
 
     fn view(&self) -> Element<'_, Message> {
         let controls = row![
+            text("From:"),
+            pick_list(self.sources.as_slice(), Some(self.source), Message::Source),
             text("Translate to:"),
             pick_list(self.choices.as_slice(), Some(self.target), Message::Target),
             button("Translate").on_press_maybe((!self.busy).then_some(Message::Translate)),
             button("Save").on_press(Message::Save),
             button("Close").on_press(Message::Close),
-            text(self.status.as_str()),
         ]
         .spacing(12)
         .align_y(Alignment::Center);
 
+        // The status gets its own line: an engine error is one long sentence and
+        // must stay readable, not be squeezed out of the controls row.
+        let header = column![controls, text(self.status.as_str())].spacing(8);
+
         column![
-            container(controls).padding(12).width(Fill),
+            container(header).padding(12).width(Fill),
             container(image(self.displayed.clone()).content_fit(ContentFit::Contain))
                 .width(Fill)
                 .height(Fill)
@@ -161,6 +207,7 @@ impl App {
 #[derive(Debug, Clone)]
 enum Message {
     Target(Choice),
+    Source(SourceChoice),
     Translate,
     Save,
     Close,
@@ -179,9 +226,11 @@ async fn translate(
     input: PathBuf,
     target: Lang,
     language: &'static LangInfo,
+    source: Option<Lang>,
 ) -> Result<Done, String> {
     let translator = pipeline::translator_from_env().map_err(|error| error.to_string())?;
-    let job = pipeline::Job::new(&input, target);
+    let mut job = pipeline::Job::new(&input, target);
+    job.source = source;
     let outcome = pipeline::run(&job, translator.as_ref()).map_err(|error| error.to_string())?;
     let canvas = Canvas::open(&outcome.output).map_err(|error| error.to_string())?;
     let handle = image::Handle::from_rgba(canvas.width, canvas.height, canvas.rgba);

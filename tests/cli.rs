@@ -1,5 +1,5 @@
-//! The command-line contract the owner asked for: `--translate` without a key
-//! fails with one clear line and a non-zero exit code, and never captures.
+//! The command-line contract: failures are one clear line and a non-zero exit
+//! code, and never cost the user a capture or write an output file.
 
 use std::process::Command;
 
@@ -17,12 +17,27 @@ fn sample_image(directory: &std::path::Path) -> std::path::PathBuf {
     path
 }
 
+/// A command with the engine environment cleared, so the host's own settings
+/// cannot make a test pass (or fail) by accident.
+fn command() -> Command {
+    let mut command = Command::new(binary());
+    for variable in [
+        "TRANSLATE_PROVIDER",
+        "DEEPL_API_KEY",
+        "DEEPL_HOST",
+        "COSMIC_SCREENSHOT_NLLB_URL",
+    ] {
+        command.env_remove(variable);
+    }
+    command
+}
+
 #[test]
-fn translate_without_a_key_fails_with_one_clear_line() {
+fn the_default_engine_without_a_sidecar_fails_with_one_clear_line() {
     let directory = tempfile::tempdir().expect("tempdir");
     let image = sample_image(directory.path());
 
-    let output = Command::new(binary())
+    let output = command()
         .args([
             "--input",
             image.to_str().unwrap(),
@@ -30,9 +45,41 @@ fn translate_without_a_key_fails_with_one_clear_line() {
             "de",
             "--no-gui",
         ])
-        .env_remove("DEEPL_API_KEY")
-        .env_remove("DEEPL_HOST")
-        .env_remove("TRANSLATE_PROVIDER")
+        .env("COSMIC_SCREENSHOT_NLLB_URL", "http://127.0.0.1:9")
+        .output()
+        .expect("run the binary");
+
+    assert_eq!(output.status.code(), Some(1), "{output:?}");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.starts_with("translation engine not available: cannot reach the local NLLB sidecar at http://127.0.0.1:9"),
+        "{stderr}"
+    );
+    assert_eq!(stderr.lines().count(), 1, "{stderr}");
+    assert!(
+        String::from_utf8_lossy(&output.stdout).trim().is_empty(),
+        "nothing may be printed as a result"
+    );
+    assert!(
+        !image.with_extension("translated.png").exists(),
+        "no output may be written without an engine"
+    );
+}
+
+#[test]
+fn deepl_without_a_key_fails_with_one_clear_line() {
+    let directory = tempfile::tempdir().expect("tempdir");
+    let image = sample_image(directory.path());
+
+    let output = command()
+        .args([
+            "--input",
+            image.to_str().unwrap(),
+            "--translate",
+            "de",
+            "--no-gui",
+        ])
+        .env("TRANSLATE_PROVIDER", "deepl")
         .output()
         .expect("run the binary");
 
@@ -40,10 +87,6 @@ fn translate_without_a_key_fails_with_one_clear_line() {
     assert_eq!(
         String::from_utf8_lossy(&output.stderr).trim(),
         "translation engine not configured: set DEEPL_API_KEY"
-    );
-    assert!(
-        String::from_utf8_lossy(&output.stdout).trim().is_empty(),
-        "nothing may be printed as a result"
     );
     assert!(
         !image.with_extension("translated.png").exists(),
@@ -56,7 +99,7 @@ fn an_unknown_language_lists_the_supported_ones() {
     let directory = tempfile::tempdir().expect("tempdir");
     let image = sample_image(directory.path());
 
-    let output = Command::new(binary())
+    let output = command()
         .args([
             "--input",
             image.to_str().unwrap(),
@@ -64,7 +107,6 @@ fn an_unknown_language_lists_the_supported_ones() {
             "klingon",
             "--no-gui",
         ])
-        .env_remove("DEEPL_API_KEY")
         .output()
         .expect("run the binary");
 
@@ -79,11 +121,39 @@ fn an_unknown_language_lists_the_supported_ones() {
 }
 
 #[test]
+fn an_unknown_source_language_is_rejected_before_the_capture() {
+    let directory = tempfile::tempdir().expect("tempdir");
+    let image = sample_image(directory.path());
+
+    let output = command()
+        .args([
+            "--input",
+            image.to_str().unwrap(),
+            "--translate",
+            "de",
+            "--source-lang",
+            "klingon",
+            "--no-gui",
+        ])
+        .output()
+        .expect("run the binary");
+
+    assert_eq!(output.status.code(), Some(1));
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("unsupported source language 'klingon'"),
+        "{stderr}"
+    );
+    assert!(stderr.contains("use 'auto'"), "{stderr}");
+    assert_eq!(stderr.lines().count(), 1, "{stderr}");
+}
+
+#[test]
 fn an_unknown_provider_is_one_line() {
     let directory = tempfile::tempdir().expect("tempdir");
     let image = sample_image(directory.path());
 
-    let output = Command::new(binary())
+    let output = command()
         .args([
             "--input",
             image.to_str().unwrap(),
@@ -91,7 +161,6 @@ fn an_unknown_provider_is_one_line() {
             "de",
             "--no-gui",
         ])
-        .env("DEEPL_API_KEY", "test-key")
         .env("TRANSLATE_PROVIDER", "google")
         .output()
         .expect("run the binary");
@@ -102,6 +171,7 @@ fn an_unknown_provider_is_one_line() {
         stderr.contains("translation provider 'google' is not implemented yet"),
         "{stderr}"
     );
+    assert!(stderr.contains("local-nmt"), "{stderr}");
     assert_eq!(stderr.lines().count(), 1, "{stderr}");
 }
 
@@ -117,6 +187,7 @@ fn help_documents_the_new_flags() {
         "--input",
         "--output",
         "--target-language",
+        "--source-lang",
         "--ocr-langs",
     ] {
         assert!(
