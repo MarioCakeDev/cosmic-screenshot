@@ -521,7 +521,7 @@ pub fn apply(
             blocks: blocks.len(),
             found: blocks.len(),
             kept: blocks.len(),
-            translated: blocks.len(),
+            translated: blocks.len() - skipped_code,
             skipped_code,
             detected_source,
             source_assumed,
@@ -584,11 +584,17 @@ pub fn looks_like_code(text: &str) -> bool {
     }
     let mut signals = 0;
 
-    // A shell verb opens the line — or follows an `ENV=value` prefix.
-    if trimmed.split_whitespace().take(2).any(|token| {
-        SHELL_VERBS.contains(&token.trim_end_matches(|c: char| !c.is_alphanumeric() && c != '-'))
-    }) {
-        signals += 1;
+    // A shell verb opens the line — or follows an `ENV=value` prefix. Commands
+    // that never open a sentence are two signals on their own; verbs that are
+    // also ordinary English words are one, so "install the portal build" stays
+    // prose while `git status` does not.
+    for (index, token) in trimmed.split_whitespace().take(2).enumerate() {
+        let word = token.trim_end_matches(|c: char| !c.is_alphanumeric() && c != '-');
+        if COMMAND_VERBS.contains(&word) {
+            signals += if index == 0 { 2 } else { 1 };
+        } else if SHELL_VERBS.contains(&word) {
+            signals += 1;
+        }
     }
     if trimmed.starts_with('$') {
         signals += 1;
@@ -604,7 +610,6 @@ pub fn looks_like_code(text: &str) -> bool {
     }
     if trimmed.contains('{')
         || trimmed.contains('}')
-        || trimmed.contains(';')
         || trimmed.contains("=>")
         || trimmed.contains("->")
         || trimmed.contains("::")
@@ -613,6 +618,17 @@ pub fn looks_like_code(text: &str) -> bool {
     {
         signals += 2;
     }
+    // A trailing `;` ends a statement; a semicolon inside a sentence does not.
+    // One mid-sentence `;` has to stay below the threshold, or "Save; then
+    // close the dialog." would stop being translated.
+    if trimmed.ends_with(';') {
+        signals += 2;
+    } else if trimmed.contains(';') {
+        signals += 1;
+    }
+    // Ratios and the word "and/or" are prose, so the relative-slash family
+    // counts once per line: "Health 80/100, Mana 40/50" stays prose.
+    let mut relative_slash = false;
     for token in trimmed.split_whitespace() {
         if token.starts_with('/')
             || token.starts_with("~/")
@@ -621,12 +637,15 @@ pub fn looks_like_code(text: &str) -> bool {
             || token.contains("://")
         {
             signals += 2;
-        } else if token.contains('/') && token.len() > 2 {
+        } else if token.contains('/') && token.len() > 2 && !relative_slash {
             signals += 1;
+            relative_slash = true;
         }
+        // Any dash token with a letter after the dash is a flag: `-m`, `-x`,
+        // `-rf`, `-la`. Negative numbers and `-` on its own are not.
         if (token.starts_with("--") && token.len() > 2)
             || (token.starts_with('-')
-                && token.len() == 2
+                && token.len() > 1
                 && token
                     .chars()
                     .nth(1)
@@ -650,8 +669,15 @@ pub fn looks_like_code(text: &str) -> bool {
     signals >= CODE_SIGNALS
 }
 
-/// Shell verbs that start a command, never a sentence.
+/// Shell verbs that are also ordinary English words: one signal, so "install
+/// the portal build" and "just build it" stay prose.
 const SHELL_VERBS: &[&str] = &[
+    "install", "make", "find", "export", "source", "echo", "kill", "ps", "just", "mount", "tar",
+];
+
+/// Commands that never open an English sentence: two signals on their own, so
+/// `git status`, `systemctl restart foo` and `ls -la` are not sent to NLLB.
+const COMMAND_VERBS: &[&str] = &[
     "cd",
     "sudo",
     "git",
@@ -663,6 +689,7 @@ const SHELL_VERBS: &[&str] = &[
     "rustup",
     "systemctl",
     "journalctl",
+    "systemd-run",
     "docker",
     "podman",
     "kubectl",
@@ -681,24 +708,16 @@ const SHELL_VERBS: &[&str] = &[
     "mv",
     "chmod",
     "chown",
-    "make",
-    "just",
-    "install",
-    "tar",
     "unzip",
-    "export",
-    "source",
-    "echo",
     "grep",
     "sed",
     "awk",
-    "find",
     "ln",
-    "mount",
+    "ls",
+    "pwd",
+    "dmesg",
+    "nmcli",
     "umount",
-    "ps",
-    "kill",
-    "systemd-run",
 ];
 
 fn rect_of(block: &TextBlock) -> Rect {
@@ -1213,6 +1232,14 @@ mod tests {
             "let x = 5;",
             "if (a == b) {",
             "https://example.com/x",
+            "sudo apt install nvidia-driver",
+            "git status",
+            "git checkout main",
+            "cargo build",
+            "systemctl restart foo",
+            "curl example.com",
+            "rm -rf build",
+            "ls -la",
         ] {
             assert!(looks_like_code(code), "{code:?} must be code");
         }
@@ -1227,6 +1254,12 @@ mod tests {
             "translated 7 of 8 lines",
             "German · 2.1 s · 7 blocks",
             "and/or",
+            "I do not know; maybe later.",
+            "Save; then close the dialog.",
+            "Menü; Einstellungen",
+            "Health 80/100, Mana 40/50",
+            "Progress 3/10 · 2/10",
+            "Input/Output · Audio/Video",
         ] {
             assert!(!looks_like_code(prose), "{prose:?} must be prose");
         }

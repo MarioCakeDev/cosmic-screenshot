@@ -171,7 +171,11 @@ is pure and fixture-tested.
   of its label. Word clustering fixes placement, fill width and column merging
   in one change; psm 11 still returns one line per row, so it is not the fix.
 - The crop is binarised before recognition: grey, histogram stretch
-  (autocontrast), then a hard threshold at 150. Game UI is anti-aliased light
+  (autocontrast), polarity normalised, then a hard threshold at 150. Polarity
+  matters because the threshold calls everything at or above it *paper*: a crop
+  whose median luma says the panel is dark is inverted first, so dim secondary
+  text stays ink instead of being folded into the background and both themes
+  read with one threshold. Game UI is anti-aliased light
   text on a dark panel, and Tesseract reads the soft edges as strokes —
   `Advancements` comes back as `AYancernrentS` on the raw pixels and reads
   correctly binarised. `COSMIC_SCREENSHOT_OCR_BINARIZE=0` and
@@ -268,7 +272,7 @@ tests/             pipeline, CLI contract, picker ↔ NLLB code cross-check
 | `DEEPL_TIMEOUT_SECS` | `30` | DeepL HTTP timeout |
 | `COSMIC_SCREENSHOT_OCR_LANGS` | all supported packs | Tesseract `-l` list; choosing it disables the automatic second OCR pass |
 | `COSMIC_SCREENSHOT_OCR_BINARIZE` | `1` | Binarise (grey → autocontrast → threshold) before recognition |
-| `COSMIC_SCREENSHOT_OCR_THRESHOLD` | `150` | Luma split point for the binarised crop, `1`–`254` |
+| `COSMIC_SCREENSHOT_OCR_THRESHOLD` | `150` | Luma split point for the binarised crop, applied after dark-panel inversion so ink is always the dark side, `1`–`254` |
 | `COSMIC_SCREENSHOT_OCR_SPELLFIX` | `1` | English-gated UI-vocabulary corrector; `0` passes OCR text through untouched |
 
 The sidecar has its own settings (`NLLB_MODEL_DIR`, `NLLB_TOKENIZER_DIR`,
