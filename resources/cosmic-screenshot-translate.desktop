@@ -1,0 +1,10 @@
+[Desktop Entry]
+Name=COSMIC Screenshot (translate)
+Comment=Capture a region and translate the captured text in place
+Type=Application
+Exec=cosmic-screenshot-translate
+Terminal=false
+Categories=COSMIC;Utility;
+Keywords=COSMIC;capture;screenshot;translate;ocr;
+Icon=com.system76.CosmicScreenshot
+StartupNotify=true
