@@ -145,8 +145,9 @@ detector, decides what Tesseract reads.
 
 For tuning against real pixels, set `COSMIC_SCREENSHOT_DEBUG_DIR=/tmp/ocr` and
 press Translate once. The run writes the exact enlarged crop handed to
-Tesseract for every mode, the raw TSV, a per-pass summary and the painted
-result, plus a `report.txt` naming the probe, the detection and the chosen pass.
+Tesseract for the pass it ran, the raw TSV, a per-pass summary and the painted
+result, plus a `report.txt` naming the probe, the detection, the chosen pass and
+any token the corrector repaired.
 
 The sidecar exposes detection as `POST /detect` for this. With an older sidecar
 that predates the endpoint, the client gets a 404 and silently falls back to

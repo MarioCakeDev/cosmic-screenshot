@@ -188,15 +188,18 @@ is pure and fixture-tested.
   tried only when it keeps fewer than two lines. The old three-mode tournament
   cost six seconds and read no better than one binarised pass.
 - Blocks below 30 % confidence are dropped, as are blocks with fewer than three
-  letters (or not one of `OK`, `No`, `On`, `Up`, `Go`) or mostly punctuation —
-  a textured button must not become a translated line, and an icon read as `Ei`
-  must not become a word.
+  letters that are not a known short label (`OK`, `No`, `Ja`, `Sí`, `Da`, `Ya`,
+  `Да`, `Не`, `Ні`, or a two-character kana/Han/Hangul word such as `はい`) or
+  mostly punctuation — a textured button must not become a translated line, and
+  an icon read as `Ei` must not become a word.
 - An optional UI-vocabulary corrector repairs a token that is one edit from a
   known menu word (`Gack` → `Back`), or two edits when an adjacent token makes a
   known phrase (`bane Menu` → `Game Menu`, `Fieport Bugs` → `Report Bugs`).
-  Tokens shorter than four letters, punctuation-bearing tokens and vocabulary
-  words are never touched, so `zu` in a German menu stays `zu`. Every repair is
-  logged in `report.txt` (`corrected: 'Gack' -> 'Back' (1 edit)`);
+  It runs only on a line that already contains an exact UI word, so a German
+  line (`Musik`, `Menü`, `Optionen`) is never rewritten into English
+  look-alikes. Tokens shorter than four letters, punctuation-bearing tokens and
+  vocabulary words are never touched, so `zu` in a German menu stays `zu`.
+  Every repair is logged in `report.txt` (`corrected: 'Gack' -> 'Back' (1 edit)`);
   `COSMIC_SCREENSHOT_OCR_SPELLFIX=0` turns it off.
 - CJK words are joined without spaces; everything else with spaces.
 - Languages: a cheap `eng` probe names the source first; the main read then uses
@@ -265,7 +268,7 @@ tests/             pipeline, CLI contract, picker ↔ NLLB code cross-check
 | `COSMIC_SCREENSHOT_OCR_LANGS` | all supported packs | Tesseract `-l` list; choosing it disables the automatic second OCR pass |
 | `COSMIC_SCREENSHOT_OCR_BINARIZE` | `1` | Binarise (grey → autocontrast → threshold) before recognition |
 | `COSMIC_SCREENSHOT_OCR_THRESHOLD` | `150` | Luma split point for the binarised crop, `1`–`254` |
-| `COSMIC_SCREENSHOT_OCR_SPELLFIX` | `1` | Repair tokens one or two edits from a known UI word; `0` passes OCR text through untouched |
+| `COSMIC_SCREENSHOT_OCR_SPELLFIX` | `1` | English-gated UI-vocabulary corrector; `0` passes OCR text through untouched |
 
 The sidecar has its own settings (`NLLB_MODEL_DIR`, `NLLB_TOKENIZER_DIR`,
 `NLLB_FASTTEXT_MODEL`, `NLLB_DEVICE`, `NLLB_COMPUTE_TYPE`, `NLLB_THREADS`,
