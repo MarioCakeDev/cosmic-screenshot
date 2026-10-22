@@ -12,6 +12,10 @@ back over the original text.
   `cosmic-screenshot` package is untouched.
 - Translation runs on the machine: no API key, no cloud, no per-character cost.
   NLLB-200 is a dedicated NMT model, not an LLM — no Ollama, no prompts.
+- Reads the capture twice: all Tesseract packs first to detect the language,
+  then the detected language's pack alone — misread accents (`für` → `fur`)
+  were translating into the wrong sentence. Isolated UI labels remain the weak
+  spot; see the measured limitation in [`docs/NLLB.md`](docs/NLLB.md).
 - Design note: [`docs/DESIGN.md`](docs/DESIGN.md); engine and install detail:
   [`docs/NLLB.md`](docs/NLLB.md).
 
@@ -47,7 +51,7 @@ translated overlay, not the original text.
 | `COSMIC_SCREENSHOT_NLLB_TIMEOUT_SECS` | `30` | sidecar HTTP timeout |
 | `DEEPL_API_KEY` | — | only for `TRANSLATE_PROVIDER=deepl` |
 | `DEEPL_HOST` | `paid` | `paid` (`api.deepl.com`), `free` (a trailing `:fx` on the key selects it automatically), or a full URL |
-| `COSMIC_SCREENSHOT_OCR_LANGS` | all supported packs | Tesseract `-l` list |
+| `COSMIC_SCREENSHOT_OCR_LANGS` | all supported packs | Tesseract `-l` list; choosing it disables the automatic second OCR pass |
 
 With the sidecar stopped, the Translate button and `--translate` fail with one
 line, before the selection UI opens:
@@ -101,7 +105,7 @@ cosmic-screenshot-translate --input shot.png --translate de
 ## Tests
 
 ```sh
-cargo test --workspace            # 94 tests, no network, no model, no key
+cargo test --workspace            # no network, no model, no key
 cargo test --workspace --all-features
 cd sidecar && python -m pytest    # engine tests with fixtures (no model)
 

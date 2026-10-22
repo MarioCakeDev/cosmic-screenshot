@@ -61,28 +61,32 @@ hold the model **resident**: a cold load is 0.7–2.3 s, so a process per captur
 would add that to every screenshot.
 
 Measured on maripop (Ryzen 7 5800X, AVX2 only), NLLB-200-distilled-600M,
-CTranslate2 int8, beam 1:
+CTranslate2 int8:
 
 | Config | 25 lines / 1121 ch | 5 lines / 184 ch | RSS |
 |---|---|---|---|
-| CPU 8 threads | 0.63 s | 274 ms | 1.4 GB |
-| CPU 4 threads | – | 318 ms | 1.4 GB |
-| CPU 1 thread | 2.56 s | 887 ms | 1.4 GB |
-| GPU int8_float16 | 0.06 s | 39 ms | 1.3 GB RSS, 1.20 GB VRAM |
+| CPU 8 threads, beam 4 (default) | 1.82 s | – | 1.4 GB |
+| CPU 8 threads, beam 1 | 0.63 s | 274 ms | 1.4 GB |
+| CPU 4 threads, beam 1 | – | 318 ms | 1.4 GB |
+| CPU 1 thread, beam 1 | 2.56 s | 887 ms | 1.4 GB |
+| GPU int8_float16, beam 1 | 0.06 s | 39 ms | 1.3 GB RSS, 1.20 GB VRAM |
 
 Three consequences, all encoded in the code:
 
 1. **One request per capture.** There is a fixed ~200 ms per-call overhead; the
    client never chunks (that is a DeepL-only limit).
 2. **Model resident** in a systemd *user* unit, started at login.
-3. **`beam_size = 1`** — beam 4 is 3× slower on CPU for a marginal gain.
+3. **`beam_size = 4`** — 3× the CPU cost of beam 1, but greedy decoding invents
+   whole sentences for isolated UI labels. A length guard keeps the original
+   text for a 1–3 token line whose translation comes back implausibly long.
 
 ### Protocol
 
 | Endpoint | Body |
 |---|---|
 | `POST /translate` | `{"lines": ["…"], "target": "de", "source": "auto" \| "de"}` → `{"translations": ["…"], "source": "de", "detected": true, "unchanged": false}` |
-| `GET /health` | model path, device, compute type, thread count, language count |
+| `POST /detect` | `{"lines": ["…"]}` → `{"source": "de", "detected": true, "fallback": false}` — used for the second OCR pass |
+| `GET /health` | model path, device, compute type, thread count, beam size, language count |
 
 Canonical two-letter codes cross the wire; the NLLB token (`deu_Latn`,
 `arb_Arab`, `zho_Hans`) exists in exactly one place, the sidecar's
@@ -150,9 +154,12 @@ is pure and fixture-tested.
 - Lines below 30 % confidence are dropped.
 - CJK words are joined without spaces; everything else with spaces.
 - Languages: all 23 supported source packs are installed, and the default `-l` is
-  the full list. Narrow it with `COSMIC_SCREENSHOT_OCR_LANGS=eng+deu` or
-  `--ocr-langs eng+deu` when speed matters — multi-language Tesseract is slower
-  than a two-language run.
+  the full list. The capture is then read **twice**: full list → fastText
+  detection → the detected language's pack alone (`deu`), because all packs at
+  once misreads accents (`für` → `fur`, `Rücksendungen` → `Ricksendungen`) and
+  the translation follows the misreading. `--ocr-langs eng+deu` /
+  `COSMIC_SCREENSHOT_OCR_LANGS` is the manual override and turns the second pass
+  off. A failed or empty second pass keeps the first reading.
 - `tesseract` missing is `OCR engine not configured: …`, one line, not a panic.
 
 ## Overlay
@@ -204,11 +211,11 @@ tests/             pipeline, CLI contract, picker ↔ NLLB code cross-check
 | `DEEPL_API_KEY` | — | only for `TRANSLATE_PROVIDER=deepl` |
 | `DEEPL_HOST` | `paid` | `paid` (`api.deepl.com`), `free` (a trailing `:fx` key selects it automatically), or a full base URL |
 | `DEEPL_TIMEOUT_SECS` | `30` | DeepL HTTP timeout |
-| `COSMIC_SCREENSHOT_OCR_LANGS` | all supported packs | Tesseract `-l` list |
+| `COSMIC_SCREENSHOT_OCR_LANGS` | all supported packs | Tesseract `-l` list; choosing it disables the automatic second OCR pass |
 
 The sidecar has its own settings (`NLLB_MODEL_DIR`, `NLLB_TOKENIZER_DIR`,
 `NLLB_FASTTEXT_MODEL`, `NLLB_DEVICE`, `NLLB_COMPUTE_TYPE`, `NLLB_THREADS`,
-`NLLB_PORT`); see [`docs/NLLB.md`](NLLB.md).
+`NLLB_BEAM_SIZE`, `NLLB_PORT`); see [`docs/NLLB.md`](NLLB.md).
 
 ## Known limits / follow-ups
 
@@ -220,7 +227,11 @@ The sidecar has its own settings (`NLLB_MODEL_DIR`, `NLLB_TOKENIZER_DIR`,
 - Copy-to-clipboard from the preview is not wired up yet; Save writes the file.
 - **NLLB quality is good but literal, clearly below DeepL** ("Mit freundlichen
   Grüßen" → "With a friendly greeting"). The engine model is 669 MB on disk and
-  about 1.4 GB RSS while resident.
+  about 1.4 GB RSS while resident. **Isolated UI labels are unreliable at any
+  beam size and with either model** (`Einstellungen` → Settings on 600M,
+  Employment on 1.3B); the length guard keeps whole-sentence hallucinations off
+  the screenshot, but a wrong short label can still appear. Full sentences are
+  fine. Measured table: [`docs/NLLB.md`](NLLB.md).
 - RTL layout (Arabic) is drawn left-to-right with a font that has the glyphs;
   proper bidi shaping is a follow-up.
 - No per-block manual editing (move/resize/retype) yet.
