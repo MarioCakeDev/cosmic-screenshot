@@ -23,6 +23,14 @@ impl std::fmt::Display for LangInfo {
     }
 }
 
+/// `cosmic::widget::dropdown` renders any `T: AsRef<str>`, which is how the
+/// dialog lists the 23 targets without building a `Vec<String>` every frame.
+impl AsRef<str> for LangInfo {
+    fn as_ref(&self) -> &str {
+        self.name
+    }
+}
+
 /// Keep this in step with `cosmic_screenshot_translation::SUPPORTED`; the test
 /// at the bottom fails if the two drift apart.
 pub const LANGS: &[LangInfo] = &[
