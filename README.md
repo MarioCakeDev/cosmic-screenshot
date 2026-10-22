@@ -61,6 +61,7 @@ translated overlay, not the original text.
 | `COSMIC_SCREENSHOT_OCR_LANGS` | all supported packs | Tesseract `-l` list; choosing it disables the probe and the narrowing pass |
 | `COSMIC_SCREENSHOT_OCR_BINARIZE` | `1` | Binarise (grey → autocontrast → threshold) before recognition; `0` hands Tesseract the greyscale crop |
 | `COSMIC_SCREENSHOT_OCR_THRESHOLD` | `150` | Luma split point for the binarised crop, `1`–`254` |
+| `COSMIC_SCREENSHOT_OCR_SPELLFIX` | `1` | Repair tokens one or two edits from a known UI word (`Gack` → `Back`); `0` passes OCR text through untouched |
 | `COSMIC_SCREENSHOT_OCR_PSM` | psm 6, fallback 11 | Pin one Tesseract page-segmentation mode (for tuning a capture) |
 | `COSMIC_SCREENSHOT_OCR_SCALE` | `2` | Enlargement before recognition, `1`–`4` (`1` disables it) |
 | `COSMIC_SCREENSHOT_DEBUG_DIR` | — | Opt-in OCR dump: each run writes the exact crop handed to Tesseract, the raw TSV and the painted result under `run-*` there |

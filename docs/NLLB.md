@@ -130,12 +130,14 @@ capture that mixes scripts can come back **partial**: the detected script is
 re-read, and lines in another script keep their original pixels (untranslated,
 not covered).
 
-Screenshots are not documents. A crop is enlarged 2× before recognition, and
-the sparse-text (11), uniform-block (6) and sparse-with-orientation (12) page
-segmentation modes are compared, keeping the reading with the most credible
-text. The status line reports **found** (lines Tesseract emitted), **kept**
-(after the confidence and readability filters), **translated** and **drawn**, so
-one translated line out of ten cannot read as success.
+Screenshots are not documents. A crop is binarised, enlarged 2× with nearest
+neighbour, and read in one uniform-block (6) pass; the sparse-text pass (11) is
+tried only when that keeps fewer than two labels. Paint boxes are built from
+words, not from Tesseract's line box, so a button border does not anchor the
+fill and two button columns on one line stay two boxes. The status line reports
+**found** (candidate label boxes), **kept** (after the confidence and
+readability filters), **translated** and **drawn**, so one translated label out
+of ten cannot read as success.
 
 `--ocr-langs eng+deu` (or `COSMIC_SCREENSHOT_OCR_LANGS`) is the manual override:
 choosing packs explicitly turns the probe off, because then the user, not the

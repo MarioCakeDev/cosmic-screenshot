@@ -160,23 +160,44 @@ Why the CLI and not a binding: no leptonica/C build on maripop, language packs a
 ordinary apt packages, and a crash in OCR cannot take the UI down. The TSV parser
 is pure and fixture-tested.
 
-- One `TextBlock` per **line** (words grouped by block/paragraph/line), bounding
-  box = union of the word boxes, confidence = mean word confidence.
+- One `TextBlock` per **label**, not per Tesseract line. Level-5 word rows are
+  filtered to tokens that contain a letter (a button border read as `|` is
+  dropped), then clustered by horizontal gap: a gap wider than twice the line's
+  median word gap — or wider than 1.2 line heights — starts a new block, and
+  each block's box is the padded union of **its words**. This matters twice
+  over: the line box starts at the button border (~410 px left of the words on
+  the Minecraft capture), and psm 6 merges two button columns into one line, so
+  a line-box fill covers the art between them and the translation lands far left
+  of its label. Word clustering fixes placement, fill width and column merging
+  in one change; psm 11 still returns one line per row, so it is not the fix.
 - The crop is binarised before recognition: grey, histogram stretch
   (autocontrast), then a hard threshold at 150. Game UI is anti-aliased light
   text on a dark panel, and Tesseract reads the soft edges as strokes —
   `Advancements` comes back as `AYancernrentS` on the raw pixels and reads
   correctly binarised. `COSMIC_SCREENSHOT_OCR_BINARIZE=0` and
   `COSMIC_SCREENSHOT_OCR_THRESHOLD` exist for tuning.
-- The binarised crop is enlarged 2× (Lanczos), because ~20 px UI labels are
-  below the size Tesseract reads best; boxes are mapped back to capture pixels
-  afterwards.
+- The binarised crop is enlarged 2× with **nearest neighbour** (not Lanczos),
+  because a pixel font is already a grid of hard-edged blocks and interpolation
+  turns each stroke into a grey ramp the threshold erodes unevenly (`B`/`G`/`F`
+  become each other). Boxes are mapped back to capture pixels afterwards. 3×
+  nearest and thresholds 130/150/170 were measured on a 1350×1100 pixel-font
+  proxy: 3× cost about 40 % more Tesseract time for no consistent gain, so 2× at
+  threshold 150 stays the default; `COSMIC_SCREENSHOT_OCR_SCALE=3` pins 3× for a
+  real crop.
 - One uniform-block pass (psm 6) reads the menu; a sparse-text pass (psm 11) is
   tried only when it keeps fewer than two lines. The old three-mode tournament
   cost six seconds and read no better than one binarised pass.
-- Lines below 30 % confidence are dropped, as are lines with fewer than two
-  letters or mostly punctuation — a textured button must not become a
-  translated line.
+- Blocks below 30 % confidence are dropped, as are blocks with fewer than three
+  letters (or not one of `OK`, `No`, `On`, `Up`, `Go`) or mostly punctuation —
+  a textured button must not become a translated line, and an icon read as `Ei`
+  must not become a word.
+- An optional UI-vocabulary corrector repairs a token that is one edit from a
+  known menu word (`Gack` → `Back`), or two edits when an adjacent token makes a
+  known phrase (`bane Menu` → `Game Menu`, `Fieport Bugs` → `Report Bugs`).
+  Tokens shorter than four letters, punctuation-bearing tokens and vocabulary
+  words are never touched, so `zu` in a German menu stays `zu`. Every repair is
+  logged in `report.txt` (`corrected: 'Gack' -> 'Back' (1 edit)`);
+  `COSMIC_SCREENSHOT_OCR_SPELLFIX=0` turns it off.
 - CJK words are joined without spaces; everything else with spaces.
 - Languages: a cheap `eng` probe names the source first; the main read then uses
   that language's packs (plus `eng` for Latin/Cyrillic/Greek screens that mix
@@ -196,9 +217,11 @@ is pure and fixture-tested.
 `crates/overlay` is pure pixel work on an RGBA buffer (no compositor, no shaders),
 which makes it deterministic and testable:
 
-1. **Cover**: the OCR box plus a margin proportional to its height (Tesseract
-   boxes are tight around glyphs; the original em box is taller). The margin hides
-   ascenders, descenders and antialiasing without eating the neighbouring line.
+1. **Cover**: the label's word-cluster box plus a margin proportional to its
+   height (Tesseract boxes are tight around glyphs; the original em box is
+   taller). The margin hides ascenders, descenders and antialiasing without
+   eating the neighbouring line — and because the box starts at the first word,
+   it no longer starts at the button border.
 2. **Paper colour**: median colour of the ring just outside the cover — a median,
    not a mean, so a neighbouring glyph or border cannot tint the patch.
 3. **Ink colour**: median of the pixels inside the box that differ from the paper
@@ -242,6 +265,7 @@ tests/             pipeline, CLI contract, picker ↔ NLLB code cross-check
 | `COSMIC_SCREENSHOT_OCR_LANGS` | all supported packs | Tesseract `-l` list; choosing it disables the automatic second OCR pass |
 | `COSMIC_SCREENSHOT_OCR_BINARIZE` | `1` | Binarise (grey → autocontrast → threshold) before recognition |
 | `COSMIC_SCREENSHOT_OCR_THRESHOLD` | `150` | Luma split point for the binarised crop, `1`–`254` |
+| `COSMIC_SCREENSHOT_OCR_SPELLFIX` | `1` | Repair tokens one or two edits from a known UI word; `0` passes OCR text through untouched |
 
 The sidecar has its own settings (`NLLB_MODEL_DIR`, `NLLB_TOKENIZER_DIR`,
 `NLLB_FASTTEXT_MODEL`, `NLLB_DEVICE`, `NLLB_COMPUTE_TYPE`, `NLLB_THREADS`,
