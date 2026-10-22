@@ -17,10 +17,15 @@ back over the original text.
   `crates/engine`, so there is exactly one copy of the OCR/overlay pipeline.
 - Translation runs on the machine: no API key, no cloud, no per-character cost.
   NLLB-200 is a dedicated NMT model, not an LLM — no Ollama, no prompts.
-- Reads the capture twice: all Tesseract packs first to detect the language,
-  then the detected language's pack alone — misread accents (`für` → `fur`)
-  were translating into the wrong sentence. Isolated UI labels remain the weak
-  spot; see the measured limitation in [`docs/NLLB.md`](docs/NLLB.md).
+- Reads the capture in two stages: a cheap English **probe** names the language
+  (no full 24-pack read, which lets Tesseract read Latin UI text as Arabic or
+  CJK), then the main pass reads with that language's packs alone, enlarged 2×
+  first. Screenshot page-segmentation modes are compared rather than assuming a
+  document. Isolated UI labels remain the weak spot; see the measured limitation
+  in [`docs/NLLB.md`](docs/NLLB.md).
+- The status line always reports **found / kept / translated / drawn**, so a
+  partial capture cannot look like a success, and pressing Translate on a screen
+  already in the target language says so instead of repainting the same words.
 - Design note: [`docs/DESIGN.md`](docs/DESIGN.md); engine and install detail:
   [`docs/NLLB.md`](docs/NLLB.md).
 
@@ -53,7 +58,10 @@ translated overlay, not the original text.
 | `COSMIC_SCREENSHOT_NLLB_TIMEOUT_SECS` | `30` | sidecar HTTP timeout |
 | `DEEPL_API_KEY` | — | only for `TRANSLATE_PROVIDER=deepl` |
 | `DEEPL_HOST` | `paid` | `paid` (`api.deepl.com`), `free` (a trailing `:fx` on the key selects it automatically), or a full URL |
-| `COSMIC_SCREENSHOT_OCR_LANGS` | all supported packs | Tesseract `-l` list; choosing it disables the automatic second OCR pass |
+| `COSMIC_SCREENSHOT_OCR_LANGS` | all supported packs | Tesseract `-l` list; choosing it disables the probe and the narrowing pass |
+| `COSMIC_SCREENSHOT_OCR_PSM` | compare 11, 6, 12 | Pin one Tesseract page-segmentation mode (for tuning a capture) |
+| `COSMIC_SCREENSHOT_OCR_SCALE` | `2` | Enlargement before recognition, `1`–`4` (`1` disables it) |
+| `COSMIC_SCREENSHOT_DEBUG_DIR` | — | Opt-in OCR dump: each run writes the exact crop handed to Tesseract, the raw TSV and the painted result under `run-*` there |
 
 With the sidecar stopped, the Translate button and `--translate` fail with one
 line, before the selection UI opens:

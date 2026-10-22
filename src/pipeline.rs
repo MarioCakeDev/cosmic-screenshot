@@ -131,18 +131,16 @@ pub fn default_output(input: &Path) -> PathBuf {
 #[derive(Debug)]
 pub struct Outcome {
     pub output: PathBuf,
-    pub blocks: usize,
-    pub report: cosmic_screenshot_overlay::Report,
-    pub detected_source: Option<Lang>,
-    /// The source language came from a low-confidence fallback, not detection.
-    pub source_assumed: bool,
+    /// Everything the engine did, including the honest found/kept/translated
+    /// counts the notification quotes.
+    pub applied: Applied,
 }
 
-impl Outcome {
-    /// "German", "English (assumed)", or "the source language" — one phrase for
-    /// the notification.
-    pub fn source_label(&self) -> String {
-        engine::source_label(self.detected_source, self.source_assumed)
+impl std::ops::Deref for Outcome {
+    type Target = Applied;
+
+    fn deref(&self) -> &Applied {
+        &self.applied
     }
 }
 
@@ -150,10 +148,7 @@ impl From<Applied> for Outcome {
     fn from(applied: Applied) -> Self {
         Self {
             output: PathBuf::new(),
-            blocks: applied.blocks,
-            report: applied.report,
-            detected_source: applied.detected_source,
-            source_assumed: applied.source_assumed,
+            applied,
         }
     }
 }
@@ -161,7 +156,7 @@ impl From<Applied> for Outcome {
 pub fn run(job: &Job, translator: &dyn Translator) -> Result<Outcome, Error> {
     let mut canvas = Canvas::open(&job.input).map_err(Error::Overlay)?;
     let applied = engine::translate_canvas(&mut canvas, &job.request(), translator, &|config| {
-        ocr::recognize(&job.input, config)
+        ocr::recognize_reading(&job.input, config)
     })?;
     canvas.save(&job.output).map_err(Error::Overlay)?;
     Ok(Outcome {

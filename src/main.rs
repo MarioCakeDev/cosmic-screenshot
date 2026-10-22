@@ -164,13 +164,18 @@ async fn run(args: Args) -> Result<(), String> {
         let outcome = pipeline::run(&job, translator.as_ref()).map_err(|e| e.to_string())?;
         println!("{}", outcome.output.display());
         if args.notify {
-            let body = format!(
-                "{} → {} · {} line(s) · {}",
-                outcome.source_label(),
-                info.name,
-                outcome.report.drawn,
-                outcome.output.display()
-            );
+            // Never report a partial run as success: the counts say what was
+            // found, what survived OCR, and what was actually painted.
+            let body = match outcome.explanation() {
+                Some(why) => format!("{why} · {}", outcome.output.display()),
+                None => format!(
+                    "{} → {} · {} · {}",
+                    outcome.source_label(),
+                    info.name,
+                    outcome.counts(),
+                    outcome.output.display()
+                ),
+            };
             notify(&body).await;
         }
         return Ok(());

@@ -40,7 +40,7 @@ workaround because it was one.
 
 `crates/engine` is the single implementation of OCR → detect → translate →
 overlay. The CLI and the portal dialog both call
-`engine::translate_canvas`, so the two-pass OCR decision, the language table and
+`engine::translate_canvas`, so the probe-and-narrow OCR decision, the language table and
 the overlay call cannot drift between them. The portal vendors these crates
 (`crates/{ocr,overlay,translation,engine}`) with their source commit recorded in
 `crates/VENDORED.md`; `contrib/sync-engine.sh` refreshes them.
@@ -162,16 +162,26 @@ is pure and fixture-tested.
 
 - One `TextBlock` per **line** (words grouped by block/paragraph/line), bounding
   box = union of the word boxes, confidence = mean word confidence.
-- Lines below 30 % confidence are dropped.
+- Tesseract is pointed at the crop enlarged 2× (Lanczos), because ~20 px UI
+  labels are below the size it reads best; boxes are mapped back to capture
+  pixels afterwards.
+- Three screenshot page-segmentation modes (sparse 11, uniform block 6, sparse
+  with orientation 12) are compared, and the reading with the most credible text
+  wins; a document-style pass (3) is the last resort when all three find nothing.
+  A screenshot is not a page.
+- Lines below 30 % confidence are dropped, as are lines with fewer than two
+  letters or mostly punctuation — a textured button must not become a
+  translated line.
 - CJK words are joined without spaces; everything else with spaces.
-- Languages: all 23 supported source packs are installed, and the default `-l` is
-  the full list. The capture is then read **twice**: full list → fastText
-  detection → the detected language's pack alone (`deu`), because all packs at
-  once misreads accents (`für` → `fur`, `Rücksendungen` → `Ricksendungen`) and
-  the translation follows the misreading. `--ocr-langs eng+deu` /
-  `COSMIC_SCREENSHOT_OCR_LANGS` is the manual override and turns the second pass
-  off. A failed or empty second pass keeps the first reading; a mixed-script
-  capture can come back partial, with the other script's lines left untranslated.
+- Languages: a cheap `eng` probe names the source first; the main read then uses
+  that language's packs (plus `eng` for Latin/Cyrillic/Greek screens that mix
+  English labels). Reading with the full list first let Tesseract pick an
+  unrelated script per word (`Game` → `سس`). The probe is trusted only when it
+  kept real Latin text; otherwise the capture is read with every pack and the
+  better reading is kept. `--ocr-langs eng+deu` / `COSMIC_SCREENSHOT_OCR_LANGS`
+  is the manual override and skips the probe. A failed or empty main pass keeps
+  the probe; a mixed-script capture can come back partial, with the other
+  script's lines left untranslated.
 - `tesseract` missing is `OCR engine not configured: …`, one line, not a panic.
 
 ## Overlay

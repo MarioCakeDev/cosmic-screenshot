@@ -103,35 +103,53 @@ Line-by-line in one batched call is the workable shape.
 
 ## Two-pass OCR
 
-Reading a capture whose language is unknown means giving Tesseract every pack.
-That is the right first move but it costs accuracy on the language it turns out
-to be: with all 24 packs, plain German is misread — `für` → `fur`,
+Reading a capture whose language is unknown used to mean giving Tesseract every
+pack. That is the right first move but it costs accuracy on the language it
+turns out to be: with all 24 packs, plain German is misread — `für` → `fur`,
 `Rücksendungen` → `Ricksendungen` — and the translation then follows the
 misreading ("The programme is free of charge for 14 days" instead of "Free
-return within 14 days").
+return within 14 days"). It also lets Tesseract resolve a Latin word as Arabic
+or CJK glyphs, which is what made game menus come back as one line.
 
-So the pipeline reads the capture twice:
+So the pipeline reads the capture in two stages:
 
-1. OCR with the full pack list → fastText detection on that text → source
-   language (e.g. `de`, 0.991);
-2. OCR **again** with only the detected language's pack (`deu`) → translate
-   those lines.
+1. A cheap **probe** with `eng` alone. Reading a Latin menu with an English model
+   still names the language reliably, and one pack cannot read `Game` as `سس`
+   the way twenty-four packs can. The probe is trusted only when it kept at
+   least two lines with a mean confidence of 60 and the text is overwhelmingly
+   Latin; otherwise the capture is read with every pack, as before.
+2. Once fastText names the language (e.g. `de`, 0.991), the **main** pass reads
+   the same crop with that language's packs (plus `eng`, because a German menu
+   can still carry English labels). A language the table knows narrows the pack
+   set *before* the main read, not after it.
 
-The second pass costs one extra Tesseract run (~200 ms) and removes a whole
-class of wrong translations. If it fails or finds no text, the first pass is
+The main pass costs one extra Tesseract run (~300 ms) and removes a whole class
+of wrong translations. If it fails or finds no text, the probe's reading is
 used and translation continues — the accuracy pass is never a requirement. A
 capture that mixes scripts can come back **partial**: the detected script is
 re-read, and lines in another script keep their original pixels (untranslated,
 not covered).
 
+Screenshots are not documents. A crop is enlarged 2× before recognition, and
+the sparse-text (11), uniform-block (6) and sparse-with-orientation (12) page
+segmentation modes are compared, keeping the reading with the most credible
+text. The status line reports **found** (lines Tesseract emitted), **kept**
+(after the confidence and readability filters), **translated** and **drawn**, so
+one translated line out of ten cannot read as success.
+
 `--ocr-langs eng+deu` (or `COSMIC_SCREENSHOT_OCR_LANGS`) is the manual override:
-choosing packs explicitly turns the second pass off, because then the user, not
-the detector, decides what Tesseract reads.
+choosing packs explicitly turns the probe off, because then the user, not the
+detector, decides what Tesseract reads.
+
+For tuning against real pixels, set `COSMIC_SCREENSHOT_DEBUG_DIR=/tmp/ocr` and
+press Translate once. The run writes the exact enlarged crop handed to
+Tesseract for every mode, the raw TSV, a per-pass summary and the painted
+result, plus a `report.txt` naming the probe, the detection and the chosen pass.
 
 The sidecar exposes detection as `POST /detect` for this. With an older sidecar
 that predates the endpoint, the client gets a 404 and silently falls back to
 one-pass OCR, so a stale sidecar never breaks a capture — it just loses the
-second pass. Reinstall the sidecar after pulling to get it — re-run
+narrowing pass. Reinstall the sidecar after pulling to get it — re-run
 `contrib/install-nllb-sidecar.sh`, which reinstalls the package *and restarts
 the unit* (see [Install](#install-on-maripop)). Engines that cannot detect
 without translating (DeepL reports the source only in its translation response)
@@ -331,7 +349,7 @@ label the table does not know, the sidecar falls back to English and reports
 status then say **English (assumed)** rather than presenting it as a detection.
 `--source-lang de` skips detection entirely
 entirely (`detected` and `fallback` are both false, and the chosen language is
-shown as the source). A trusted detection also drives the second OCR pass
+shown as the source). A trusted detection also drives the OCR narrowing
 ([Two-pass OCR](#two-pass-ocr)); a low-confidence fallback never does.
 
 ## Environment variables (sidecar)

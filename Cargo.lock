@@ -311,6 +311,10 @@ dependencies = [
 [[package]]
 name = "cosmic-screenshot-ocr"
 version = "1.11.0"
+dependencies = [
+ "image",
+ "tempfile",
+]
 
 [[package]]
 name = "cosmic-screenshot-overlay"
