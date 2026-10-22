@@ -21,7 +21,7 @@ maripop: Ryzen 7 5800X, AVX2 only. NLLB-200-distilled-600M, CTranslate2 int8:
 
 | Config | 25 lines / 1121 ch | 5 lines / 184 ch | RSS |
 |---|---|---|---|
-| CPU 8 threads, beam 4 (default) | 1.82 s | – | 1.4 GB |
+| CPU 8 threads, beam 4 (default) | 1.82 s | – | 1.5 GB |
 | CPU 8 threads, beam 1 | 0.63 s | 274 ms | 1.4 GB |
 | CPU 4 threads, beam 1 | – | 318 ms | 1.4 GB |
 | CPU 2 threads, beam 1 | 1.40 s | 498 ms | 1.4 GB |
@@ -119,7 +119,7 @@ So the pipeline reads the capture twice:
 
 The second pass costs one extra Tesseract run (~200 ms) and removes a whole
 class of wrong translations. If the second pass fails or finds nothing (for
-example a mixed German/English capture), the first pass is used and translation
+example a capture that mixes scripts), the first pass is used and translation
 continues — the accuracy pass is never a requirement.
 
 `--ocr-langs eng+deu` (or `COSMIC_SCREENSHOT_OCR_LANGS`) is the manual override:

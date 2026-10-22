@@ -69,15 +69,16 @@ echo "== systemd user unit"
 mkdir -p "$UNIT_DIR"
 install -m0644 "$REPO/sidecar/systemd/cosmic-screenshot-nllb.service" "$UNIT_DIR/"
 systemctl --user daemon-reload
-if ! systemctl --user enable --now cosmic-screenshot-nllb.service; then
-    echo "could not start the user service; run this inside the desktop session:" >&2
+# `enable` alone does not start the unit, and `restart` both starts a stopped
+# one and reloads a running one. That way the model is loaded exactly once on a
+# first install, and a re-run picks up the freshly installed package instead of
+# leaving the old module in memory.
+if ! systemctl --user enable cosmic-screenshot-nllb.service ||
+   ! systemctl --user restart cosmic-screenshot-nllb.service; then
+    echo "could not enable/start the user service; run this inside the desktop session:" >&2
     echo "  systemctl --user enable --now cosmic-screenshot-nllb.service" >&2
     exit 1
 fi
-# `enable --now` leaves an already-running unit on the code it imported at
-# start. Re-running this script installs a new package into the same venv, so
-# the service has to reload it; otherwise a pulled fix never reaches /health.
-systemctl --user restart cosmic-screenshot-nllb.service
 
 echo "== waiting for the model to load"
 attempt=0

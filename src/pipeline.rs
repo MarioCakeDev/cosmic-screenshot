@@ -102,7 +102,10 @@ impl Job {
             target,
             source: None,
             ocr: ocr_config(None),
-            two_pass_ocr: true,
+            // The environment can choose the packs too; a chosen list is the
+            // user's decision, and the preview window must honour it just as
+            // the headless path does.
+            two_pass_ocr: ocr_languages_override(None).is_none(),
             options: Options::default(),
         }
     }

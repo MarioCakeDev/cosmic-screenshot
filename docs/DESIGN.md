@@ -65,7 +65,7 @@ CTranslate2 int8:
 
 | Config | 25 lines / 1121 ch | 5 lines / 184 ch | RSS |
 |---|---|---|---|
-| CPU 8 threads, beam 4 (default) | 1.82 s | – | 1.4 GB |
+| CPU 8 threads, beam 4 (default) | 1.82 s | – | 1.5 GB |
 | CPU 8 threads, beam 1 | 0.63 s | 274 ms | 1.4 GB |
 | CPU 4 threads, beam 1 | – | 318 ms | 1.4 GB |
 | CPU 1 thread, beam 1 | 2.56 s | 887 ms | 1.4 GB |
@@ -227,11 +227,11 @@ The sidecar has its own settings (`NLLB_MODEL_DIR`, `NLLB_TOKENIZER_DIR`,
 - Copy-to-clipboard from the preview is not wired up yet; Save writes the file.
 - **NLLB quality is good but literal, clearly below DeepL** ("Mit freundlichen
   Grüßen" → "With a friendly greeting"). The engine model is 669 MB on disk and
-  about 1.4 GB RSS while resident. **Isolated UI labels are unreliable at any
-  beam size and with either model** (`Einstellungen` → Settings on 600M,
-  Employment on 1.3B); the length guard keeps whole-sentence hallucinations off
-  the screenshot, but a wrong short label can still appear. Full sentences are
-  fine. Measured table: [`docs/NLLB.md`](NLLB.md).
+  about 1.5 GB RSS at the default beam 4 while resident. **Isolated UI labels
+  are unreliable at any beam size and with either model** (`Einstellungen` →
+  Settings on 600M, Employment on 1.3B); the length guard keeps whole-sentence
+  hallucinations off the screenshot, but a wrong short label can still appear.
+  Full sentences are fine. Measured table: [`docs/NLLB.md`](NLLB.md).
 - RTL layout (Arabic) is drawn left-to-right with a font that has the glyphs;
   proper bidi shaping is a follow-up.
 - No per-block manual editing (move/resize/retype) yet.
