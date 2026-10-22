@@ -129,9 +129,11 @@ the detector, decides what Tesseract reads.
 The sidecar exposes detection as `POST /detect` for this. With an older sidecar
 that predates the endpoint, the client gets a 404 and silently falls back to
 one-pass OCR, so a stale sidecar never breaks a capture — it just loses the
-second pass. Reinstall the sidecar after pulling to get it (see
-[Install](#install-on-maripop)). Engines that cannot detect without translating
-(DeepL reports the source only in its translation response) skip the pass.
+second pass. Reinstall the sidecar after pulling to get it — re-run
+`contrib/install-nllb-sidecar.sh`, which reinstalls the package *and restarts
+the unit* (see [Install](#install-on-maripop)). Engines that cannot detect
+without translating (DeepL reports the source only in its translation response)
+skip the pass.
 
 ## Install on maripop
 
@@ -146,7 +148,9 @@ One command:
 ```
 
 It installs the venv, the model, the tokenizer, `lid.176.ftz`, the unit, enables
-and starts the service, and waits for `/health`. The same steps by hand:
+and restarts the service, and waits for `/health`. Re-running it after a `git
+pull` reinstalls the Python package and restarts the unit, so a pulled fix
+actually reaches the running service. The same steps by hand:
 
 ```sh
 # 1. virtualenv + Python dependencies

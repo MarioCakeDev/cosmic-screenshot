@@ -74,6 +74,10 @@ if ! systemctl --user enable --now cosmic-screenshot-nllb.service; then
     echo "  systemctl --user enable --now cosmic-screenshot-nllb.service" >&2
     exit 1
 fi
+# `enable --now` leaves an already-running unit on the code it imported at
+# start. Re-running this script installs a new package into the same venv, so
+# the service has to reload it; otherwise a pulled fix never reaches /health.
+systemctl --user restart cosmic-screenshot-nllb.service
 
 echo "== waiting for the model to load"
 attempt=0
