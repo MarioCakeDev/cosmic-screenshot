@@ -12,8 +12,12 @@ Environment=TRANSFORMERS_VERBOSITY=error
 # The model and tokenizer are local files; the service never needs the network.
 Environment=HF_HUB_OFFLINE=1
 # One capture's lines are translated in a single call; 8 threads measured best
-# on a Ryzen 7 5800X (0.63 s for 25 lines). Lower it to keep the desktop cool.
+# on a Ryzen 7 5800X (1.82 s for 25 lines at the default beam 4). Lower it to
+# keep the desktop cool.
 Environment=NLLB_THREADS=8
+# Beam 4 is the default in the engine; beam 1 invents whole sentences for
+# isolated UI labels. Set NLLB_BEAM_SIZE=1 only if you accept that.
+Environment=NLLB_BEAM_SIZE=4
 Restart=on-failure
 RestartSec=3
 # 78 = EX_CONFIG: a missing model or tokenizer must not restart-loop.

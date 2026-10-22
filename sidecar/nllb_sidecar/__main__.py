@@ -16,7 +16,13 @@ import sys
 from pathlib import Path
 
 from .detect import DefaultDetector, Detector
-from .engine import EngineError, NllbEngine, one_line
+from .engine import (
+    DEFAULT_BEAM_SIZE,
+    MAX_BEAM_SIZE,
+    EngineError,
+    NllbEngine,
+    one_line,
+)
 from .languages import LanguageTable, LanguageTableError
 from .server import Sidecar, serve
 
@@ -56,6 +62,11 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--compute-type", default=os.environ.get("NLLB_COMPUTE_TYPE", "auto"))
     parser.add_argument("--threads", type=int, default=int(os.environ.get("NLLB_THREADS", "0")))
     parser.add_argument(
+        "--beam-size", type=int, default=None,
+        help=f"decoding beam width (default: NLLB_BEAM_SIZE or {DEFAULT_BEAM_SIZE}); "
+             "1 is faster but invents whole sentences on isolated labels",
+    )
+    parser.add_argument(
         "--default-source", default=os.environ.get("NLLB_DEFAULT_SOURCE") or None,
         help="language used when detection is not confident (default: from the table)",
     )
@@ -82,6 +93,23 @@ def main(argv: list[str] | None = None) -> int:
     except (EngineError, LanguageTableError) as error:
         print(f"translation engine not available: {one_line(error)}", file=sys.stderr)
         return EX_CONFIG
+
+
+def beam_size_from(flag_value: int | None, environ=os.environ) -> int:
+    """`--beam-size` wins over `NLLB_BEAM_SIZE`; both are validated."""
+    if flag_value is not None:
+        value = flag_value
+    else:
+        raw = (environ.get("NLLB_BEAM_SIZE") or "").strip()
+        if not raw:
+            return DEFAULT_BEAM_SIZE
+        try:
+            value = int(raw)
+        except ValueError as error:
+            raise EngineError(f"NLLB_BEAM_SIZE='{raw}' is not an integer") from error
+    if not 1 <= value <= MAX_BEAM_SIZE:
+        raise EngineError(f"beam size must be between 1 and {MAX_BEAM_SIZE}")
+    return value
 
 
 def min_confidence_from(flag_value: float | None, environ=os.environ) -> float | None:
@@ -120,6 +148,7 @@ def _run(args: argparse.Namespace) -> int:
         device=args.device,
         compute_type=args.compute_type,
         threads=args.threads,
+        beam_size=beam_size_from(args.beam_size),
     )
 
     fasttext_path = Path(args.fasttext_model)
@@ -140,13 +169,14 @@ def _run(args: argparse.Namespace) -> int:
         raise EngineError(f"cannot listen on {args.host}:{args.port}: {one_line(error)}") from error
 
     logging.info(
-        "listening on http://%s:%d (model %s, %s/%s, %d threads, %d languages, detector %s)",
+        "listening on http://%s:%d (model %s, %s/%s, %d threads, beam %d, %d languages, detector %s)",
         args.host,
         server.server_port,
         args.model_dir,
         engine.device,
         engine.compute_type,
         engine.threads,
+        engine.beam_size,
         len(table.languages),
         detector_name,
     )

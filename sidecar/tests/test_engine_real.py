@@ -68,3 +68,20 @@ def test_chinese_script_resolution(engine):
     [hant] = engine.translate([traditional], "eng_Latn", resolve_source(table, "zh", traditional))
     assert hans.strip() and hant.strip()
     assert hans != hant
+
+
+def test_beam_four_is_the_default(engine):
+    assert engine.beam_size == 4
+
+
+def test_a_greedy_label_cannot_paint_a_sentence(engine):
+    # At beam 1 the measured failure mode is a whole sentence for one word
+    # ("Abbrechen" -> "... the countries of the European Union:"). The length
+    # guard must keep every 1-token label down to a label-sized translation.
+    engine.beam_size = 1
+    try:
+        for label in ["Abbrechen", "Einstellungen", "Abmelden"]:
+            [translated] = engine.translate([label], "eng_Latn", "deu_Latn")
+            assert len(translated.split()) <= 3, (label, translated)
+    finally:
+        engine.beam_size = 4
