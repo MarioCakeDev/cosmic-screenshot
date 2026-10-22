@@ -69,7 +69,8 @@ struct Args {
     /// Never open the preview window
     #[arg(long)]
     no_gui: bool,
-    /// Tesseract -l value for the source languages (e.g. eng+deu)
+    /// Tesseract -l value for the source languages (e.g. eng+deu); choosing it
+    /// also turns off the automatic second OCR pass
     #[arg(long, value_name = "LIST")]
     ocr_langs: Option<String>,
 }
@@ -162,6 +163,8 @@ async fn run(args: Args) -> Result<(), String> {
         let mut job = pipeline::Job::new(&path, lang::translation_lang(info));
         job.source = source;
         job.ocr = pipeline::ocr_config(args.ocr_langs.clone());
+        // Explicit packs are the user's call; detection must not override them.
+        job.two_pass_ocr = pipeline::ocr_languages_override(args.ocr_langs.as_deref()).is_none();
         if let Some(output) = &args.output {
             job.output = output.clone();
         }

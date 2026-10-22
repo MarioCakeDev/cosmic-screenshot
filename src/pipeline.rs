@@ -6,7 +6,9 @@ use std::path::{Path, PathBuf};
 
 use cosmic_screenshot_ocr::{self as ocr, TextBlock};
 use cosmic_screenshot_overlay::{self as overlay, Canvas, FontSet, Options, Rect, TranslatedBlock};
-use cosmic_screenshot_translation::{self as translation, Lang, TranslateError, Translator};
+use cosmic_screenshot_translation::{
+    self as translation, Detected, Lang, TranslateError, Translator,
+};
 
 use crate::lang;
 
@@ -38,20 +40,43 @@ pub fn translator_from_env() -> Result<Box<dyn Translator>, TranslateError> {
 /// the command line narrows them.
 pub fn ocr_config(languages_override: Option<String>) -> ocr::Config {
     let mut config = ocr::Config::from_env();
-    match languages_override {
-        Some(languages) if !languages.trim().is_empty() => {
-            config.languages = languages.trim().to_string();
-        }
-        _ => {
-            if std::env::var(ocr::LANGUAGES_VARIABLE)
-                .map(|value| value.trim().is_empty())
-                .unwrap_or(true)
-            {
-                config.languages = lang::all_ocr_languages();
-            }
-        }
+    match ocr_languages_override(languages_override.as_deref()) {
+        Some(languages) => config.languages = languages,
+        None => config.languages = lang::all_ocr_languages(),
     }
     config
+}
+
+/// The `-l` packs the user chose explicitly, from the flag or the environment.
+///
+/// This is also the signal that turns the two-pass OCR off: a chosen list means
+/// the user knows the source language, and re-reading with a detected pack
+/// would override that choice.
+pub fn ocr_languages_override(flag: Option<&str>) -> Option<String> {
+    let from_env = std::env::var(ocr::LANGUAGES_VARIABLE).ok();
+    explicit_languages(flag, from_env.as_deref())
+}
+
+fn explicit_languages(flag: Option<&str>, from_env: Option<&str>) -> Option<String> {
+    flag.or(from_env)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string)
+}
+
+/// The packs for a confirmation OCR pass, or `None` when there is no point.
+///
+/// All packs at once is the only way to read text whose language is unknown,
+/// but it is worse at the language it eventually turns out to be: a 24-pack
+/// Tesseract reads `für` as `fur` and `Rücksendungen` as `Ricksendungen`. Once
+/// detection has named the language, re-read the capture with that pack alone.
+/// A low-confidence fallback is not a detection, and a language with no row in
+/// [`lang::LANGS`] has no pack to name.
+pub fn confirmation_languages(detected: Detected) -> Option<&'static str> {
+    if detected.assumed {
+        return None;
+    }
+    lang::find(detected.lang.code()).map(|info| info.tesseract)
 }
 
 pub struct Job {
@@ -61,6 +86,9 @@ pub struct Job {
     /// Explicit source language; `None` means detect it from the capture.
     pub source: Option<Lang>,
     pub ocr: ocr::Config,
+    /// Re-read the capture with the detected language's pack alone. Off when
+    /// the user chose the OCR packs (`--ocr-langs`, the environment).
+    pub two_pass_ocr: bool,
     pub options: Options,
 }
 
@@ -74,6 +102,7 @@ impl Job {
             target,
             source: None,
             ocr: ocr_config(None),
+            two_pass_ocr: true,
             options: Options::default(),
         }
     }
@@ -116,12 +145,14 @@ pub struct Applied {
 
 pub fn run(job: &Job, translator: &dyn Translator) -> Result<Outcome, PipelineError> {
     let mut canvas = Canvas::open(&job.input).map_err(PipelineError::Overlay)?;
-    let blocks = ocr::recognize(&job.input, &job.ocr).map_err(PipelineError::Ocr)?;
+    let (blocks, source) = recognize_blocks(job, translator, &|config| {
+        ocr::recognize(&job.input, config)
+    })?;
     let applied = apply(
         &mut canvas,
         &blocks,
         job.target,
-        job.source,
+        source,
         translator,
         &job.options,
     )?;
@@ -133,6 +164,38 @@ pub fn run(job: &Job, translator: &dyn Translator) -> Result<Outcome, PipelineEr
         detected_source: applied.detected_source,
         source_assumed: applied.source_assumed,
     })
+}
+
+/// OCR the capture, with the second pass when the source has to be detected.
+///
+/// The recognizer is a parameter so the decision can be tested without
+/// Tesseract; production passes [`ocr::recognize`] bound to `job.input`.
+fn recognize_blocks(
+    job: &Job,
+    translator: &dyn Translator,
+    recognize: &dyn Fn(&ocr::Config) -> Result<Vec<TextBlock>, ocr::OcrError>,
+) -> Result<(Vec<TextBlock>, Option<Lang>), PipelineError> {
+    let blocks = recognize(&job.ocr).map_err(PipelineError::Ocr)?;
+    if !job.two_pass_ocr || job.source.is_some() || blocks.is_empty() {
+        return Ok((blocks, job.source));
+    }
+
+    let texts: Vec<&str> = blocks.iter().map(|block| block.text.as_str()).collect();
+    let detected = translator
+        .detect_source(&texts)
+        .map_err(PipelineError::Translation)?;
+    let Some(languages) = detected.and_then(confirmation_languages) else {
+        return Ok((blocks, None));
+    };
+
+    let narrowed = job.ocr.clone().with_languages(languages);
+    // A narrower pack can find nothing (a mixed-script capture) or be missing
+    // from the install. The first pass already suffices then — the second pass
+    // is an accuracy gain, never a requirement.
+    match recognize(&narrowed) {
+        Ok(second) if !second.is_empty() => Ok((second, detected.map(|detected| detected.lang))),
+        _ => Ok((blocks, None)),
+    }
 }
 
 /// Translate already-recognised blocks and paint them onto `canvas`.
@@ -219,6 +282,7 @@ impl std::error::Error for PipelineError {}
 #[cfg(test)]
 mod tests {
     use super::*;
+    use cosmic_screenshot_translation::testing::FakeTranslator;
 
     fn outcome(detected: Option<Lang>, assumed: bool) -> Outcome {
         Outcome {
@@ -232,6 +296,169 @@ mod tests {
             detected_source: detected,
             source_assumed: assumed,
         }
+    }
+
+    fn detected(code: &str, assumed: bool) -> Detected {
+        Detected {
+            lang: Lang::parse(code).expect("test language"),
+            assumed,
+        }
+    }
+
+    fn line(text: &str) -> TextBlock {
+        TextBlock {
+            bbox: ocr::Bbox {
+                x: 0,
+                y: 0,
+                width: 10,
+                height: 10,
+            },
+            text: text.to_string(),
+            confidence: 95.0,
+        }
+    }
+
+    /// Run `recognize_blocks` with a fake recognizer, recording each `-l` list.
+    fn passes(
+        job: &Job,
+        translator: &FakeTranslator,
+        second: Result<Vec<TextBlock>, ocr::OcrError>,
+    ) -> (Vec<TextBlock>, Option<Lang>, Vec<String>) {
+        let configs = std::cell::RefCell::new(Vec::new());
+        let second = std::cell::RefCell::new(Some(second));
+        let result = recognize_blocks(job, translator, &|config| {
+            let first = configs.borrow().is_empty();
+            configs.borrow_mut().push(config.languages.clone());
+            if first {
+                Ok(vec![line("für")])
+            } else {
+                second
+                    .borrow_mut()
+                    .take()
+                    .expect("the second pass runs at most once")
+            }
+        });
+        let (blocks, source) = result.expect("recognizing succeeds");
+        (blocks, source, configs.into_inner())
+    }
+
+    #[test]
+    fn the_second_pass_re_reads_with_the_detected_pack_alone() {
+        let job = Job::new("/tmp/shot.png", Lang::parse("en").unwrap());
+        let all = job.ocr.languages.clone();
+        let translator = FakeTranslator::new("").with_detection("de");
+
+        let (blocks, source, configs) = passes(&job, &translator, Ok(vec![line("für")]));
+
+        assert_eq!(configs, vec![all, "deu".to_string()]);
+        assert_eq!(source.map(Lang::code), Some("de"));
+        assert_eq!(blocks[0].text, "für");
+    }
+
+    #[test]
+    fn an_assumed_detection_leaves_the_single_pass_alone() {
+        let job = Job::new("/tmp/shot.png", Lang::parse("en").unwrap());
+        let translator = FakeTranslator::new("").assuming_the_source_on_detection("en");
+
+        let (_, source, configs) = passes(&job, &translator, Ok(vec![line("x")]));
+
+        assert_eq!(configs.len(), 1, "an assumed language must not re-read");
+        assert_eq!(source, None, "the sidecar detects again when translating");
+    }
+
+    #[test]
+    fn an_explicit_source_skips_detection_entirely() {
+        let mut job = Job::new("/tmp/shot.png", Lang::parse("en").unwrap());
+        job.source = Some(Lang::parse("de").unwrap());
+        let translator = FakeTranslator::new("").with_detection("ja");
+
+        let (_, source, configs) = passes(&job, &translator, Ok(vec![line("x")]));
+
+        assert_eq!(configs.len(), 1);
+        assert_eq!(source.map(Lang::code), Some("de"));
+    }
+
+    #[test]
+    fn chosen_ocr_packs_disable_the_second_pass() {
+        let mut job = Job::new("/tmp/shot.png", Lang::parse("en").unwrap());
+        job.ocr.languages = "eng+deu".to_string();
+        job.two_pass_ocr = false;
+        let translator = FakeTranslator::new("").with_detection("ja");
+
+        let (_, source, configs) = passes(&job, &translator, Ok(vec![line("x")]));
+
+        assert_eq!(configs, vec!["eng+deu".to_string()]);
+        assert_eq!(source, None);
+    }
+
+    #[test]
+    fn a_failed_or_empty_second_pass_keeps_the_first_reading() {
+        let job = Job::new("/tmp/shot.png", Lang::parse("en").unwrap());
+        let translator = FakeTranslator::new("").with_detection("de");
+
+        let failed = passes(
+            &job,
+            &translator,
+            Err(ocr::OcrError::Spawn("no deu".into())),
+        );
+        assert_eq!(failed.0[0].text, "für");
+        assert_eq!(failed.1, None, "the first pass has no detection yet");
+
+        let empty = passes(&job, &translator, Ok(Vec::new()));
+        assert_eq!(empty.0[0].text, "für");
+        assert_eq!(empty.1, None);
+    }
+
+    #[test]
+    fn an_empty_capture_costs_no_detection() {
+        let job = Job::new("/tmp/shot.png", Lang::parse("en").unwrap());
+        let translator = FakeTranslator::new("").with_detection("de");
+        let configs = std::cell::RefCell::new(Vec::new());
+
+        let result = recognize_blocks(&job, &translator, &|config| {
+            configs.borrow_mut().push(config.languages.clone());
+            Ok(Vec::new())
+        })
+        .expect("recognizing succeeds");
+
+        assert!(result.0.is_empty());
+        assert_eq!(configs.into_inner().len(), 1, "nothing to detect");
+    }
+
+    #[test]
+    fn the_confirmation_pass_uses_the_detected_pack_alone() {
+        assert_eq!(confirmation_languages(detected("de", false)), Some("deu"));
+        assert_eq!(confirmation_languages(detected("ja", false)), Some("jpn"));
+        assert_eq!(
+            confirmation_languages(detected("zh", false)),
+            Some("chi_sim+chi_tra"),
+            "the Chinese row carries both packs"
+        );
+    }
+
+    #[test]
+    fn an_assumed_language_never_narrows_the_ocr_packs() {
+        assert_eq!(confirmation_languages(detected("en", true)), None);
+    }
+
+    #[test]
+    fn the_flag_outranks_the_environment_and_blank_values_do_not_count() {
+        assert_eq!(
+            explicit_languages(Some(" eng+deu "), Some("fra")).as_deref(),
+            Some("eng+deu")
+        );
+        assert_eq!(
+            explicit_languages(None, Some("fra")).as_deref(),
+            Some("fra")
+        );
+        assert_eq!(explicit_languages(None, None), None);
+        assert_eq!(explicit_languages(Some("  "), None), None);
+    }
+
+    #[test]
+    fn a_new_job_reads_the_capture_twice() {
+        let job = Job::new("/tmp/shot.png", Lang::parse("en").unwrap());
+        assert!(job.two_pass_ocr);
     }
 
     #[test]

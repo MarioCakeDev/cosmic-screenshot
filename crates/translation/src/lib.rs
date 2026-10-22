@@ -173,6 +173,15 @@ pub struct Translated {
     pub detected_source: Option<Lang>,
 }
 
+/// The source language an engine named, before any translation ran.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Detected {
+    pub lang: Lang,
+    /// Detection was not trusted and this is the engine's configured default.
+    /// The pipeline must not use an assumed language to narrow its OCR packs.
+    pub assumed: bool,
+}
+
 /// A translation response, in the same order as the texts that were sent.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Batch {
@@ -335,6 +344,17 @@ pub trait Translator: Send + Sync {
         target: Lang,
         source: Option<Lang>,
     ) -> Result<Batch, TranslateError>;
+
+    /// Detect the source language of `texts` without translating them.
+    ///
+    /// The OCR pipeline uses this for its second pass: once the language is
+    /// known, the capture is re-read with that language's pack alone, which
+    /// misreads accented words far less than all packs at once. Engines with
+    /// no detector of their own (DeepL) return `None`, which skips that pass
+    /// and leaves one-pass OCR unchanged.
+    fn detect_source(&self, _texts: &[&str]) -> Result<Option<Detected>, TranslateError> {
+        Ok(None)
+    }
 }
 
 #[cfg(test)]

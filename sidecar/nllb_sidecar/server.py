@@ -5,6 +5,8 @@ Endpoints:
 * `GET  /health`    — model, device and language count; used by the install check
 * `POST /translate` — `{"lines": [...], "target": "de", "source": "auto" | "de"}`
                       → `{"translations": [...], "source": "de", ...}`
+* `POST /detect`    — `{"lines": [...]}` → `{"source": "de", "source_confidence": 0.99}`
+                      without translating; used for the client's second OCR pass
 
 Only loopback is expected (the systemd unit binds 127.0.0.1). Errors are JSON
 with a single-line `error`, so the desktop client can print one line instead of
@@ -52,9 +54,19 @@ class Sidecar:
             "device": str(getattr(self.engine, "device", "unknown")),
             "compute_type": str(getattr(self.engine, "compute_type", "unknown")),
             "threads": int(getattr(self.engine, "threads", 0)),
+            "beam_size": int(getattr(self.engine, "beam_size", 0)),
             "languages": len(self.table.languages),
             "detector": self.detector_name,
         }
+
+    def detect(self, payload: object) -> dict:
+        """Source language of `lines`, without translating them.
+
+        The desktop client uses this for its two-pass OCR: read the capture with
+        every pack, detect the language from that text, then re-read it with the
+        detected language's pack alone, which reads accents far more reliably.
+        """
+        return _detection(self.detector.detect(_validate_lines(payload)))
 
     def translate(self, payload: object) -> dict:
         lines, target, source = _validate(payload, self.table)
@@ -88,7 +100,7 @@ class Sidecar:
         return _response(translations, source_iso, detection)
 
 
-def _validate(payload: object, table: LanguageTable) -> tuple[list[str], str, str | None]:
+def _validate_lines(payload: object) -> list[str]:
     if not isinstance(payload, dict):
         raise BadRequest("the request body must be a JSON object")
     lines = payload.get("lines")
@@ -101,6 +113,11 @@ def _validate(payload: object, table: LanguageTable) -> tuple[list[str], str, st
             raise BadRequest("'lines' must contain only strings")
         if len(line) > MAX_LINE_CHARS:
             raise BadRequest(f"a line is longer than {MAX_LINE_CHARS} characters")
+    return list(lines)
+
+
+def _validate(payload: object, table: LanguageTable) -> tuple[list[str], str, str | None]:
+    lines = _validate_lines(payload)
 
     target = payload.get("target")
     if not isinstance(target, str) or not target.strip():
@@ -127,6 +144,18 @@ def _validate(payload: object, table: LanguageTable) -> tuple[list[str], str, st
                 {"supported": sorted(table.languages)},
             )
     return list(lines), target, source
+
+
+def _detection(detection: Detection) -> dict:
+    """The detection fields of `/translate`, without any translation."""
+    return {
+        "source": detection.iso,
+        "source_confidence": round(float(detection.confidence), 3),
+        "detected": not detection.used_default,
+        # `source` is the configured default, not a detection: the client must
+        # say "assumed" and leave the OCR language alone.
+        "fallback": bool(detection.used_default),
+    }
 
 
 def _response(
@@ -159,13 +188,18 @@ def make_handler(sidecar: Sidecar):
                 self._send(404, {"error": f"no such endpoint: {self.path}"})
 
         def do_POST(self) -> None:  # noqa: N802 - http.server API
-            if self.path.rstrip("/") != "/translate":
+            routes = {
+                "/translate": sidecar.translate,
+                "/detect": sidecar.detect,
+            }
+            handler = routes.get(self.path.rstrip("/"))
+            if handler is None:
                 self._send(404, {"error": f"no such endpoint: {self.path}"})
                 return
             started = time.monotonic()
             try:
                 payload = self._read_json()
-                body = sidecar.translate(payload)
+                body = handler(payload)
                 status = 200
             except BadRequest as error:
                 body = {"error": one_line(error), "code": error.code, **error.details}

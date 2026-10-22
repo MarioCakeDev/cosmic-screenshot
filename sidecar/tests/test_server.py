@@ -19,6 +19,7 @@ class FakeEngine:
     device = "cpu"
     compute_type = "int8"
     threads = 8
+    beam_size = 4
 
     def __init__(self, fail: str | None = None, count: int | None = None):
         self.fail = fail
@@ -168,8 +169,39 @@ def test_health_reports_the_engine(table):
     assert health["ok"] is True
     assert health["device"] == "cpu"
     assert health["compute_type"] == "int8"
+    assert health["beam_size"] == 4
     assert health["languages"] == len(table.languages)
     assert health["detector"] == "fixed"
+
+
+def test_detect_names_the_source_without_translating(table):
+    engine = FakeEngine()
+    body = sidecar(table, engine, FixedDetector("de", 0.991)).detect(
+        {"lines": ["Hallo", "Welt"]}
+    )
+    assert body == {
+        "source": "de",
+        "source_confidence": 0.991,
+        "detected": True,
+        "fallback": False,
+    }
+    assert engine.calls == [], "detection must not cost a translation"
+
+
+def test_detect_flags_a_low_confidence_fallback(table):
+    body = sidecar(table, detector=DefaultDetector(table)).detect({"lines": ["Hallo"]})
+    assert body["source"] == table.default_source
+    assert body["detected"] is False
+    assert body["fallback"] is True
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [{}, {"lines": "Hallo"}, {"lines": []}, {"lines": [1]}],
+)
+def test_detect_rejects_malformed_requests(table, payload):
+    with pytest.raises(BadRequest):
+        sidecar(table).detect(payload)
 
 
 @pytest.fixture()
@@ -202,6 +234,13 @@ def test_http_translate_and_health(running):
     with urllib.request.urlopen(f"{running}/health", timeout=5) as response:
         health = json.loads(response.read())
     assert health["ok"] is True
+
+
+def test_http_detect_route(running):
+    status, body = post(f"{running}/detect", {"lines": ["Hallo"]})
+    assert status == 200
+    assert body["source"] == "de"
+    assert body["detected"] is True
 
 
 def test_http_errors_are_json_with_one_line(running):

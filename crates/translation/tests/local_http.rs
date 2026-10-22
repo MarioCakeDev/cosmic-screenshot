@@ -229,3 +229,71 @@ fn a_malformed_url_is_configuration_not_a_panic() {
         "{error}"
     );
 }
+
+#[test]
+fn two_pass_ocr_asks_for_the_source_without_translating() {
+    let (url, requests) = serve(vec![http_response(
+        "200 OK",
+        r#"{"source":"de","source_confidence":0.991,"detected":true,"fallback":false}"#,
+    )]);
+    let translator = LocalTranslator::new(url);
+
+    let detected = translator
+        .detect_source(&["Hallo", "Welt"])
+        .expect("detection succeeds")
+        .expect("a language");
+
+    assert_eq!(detected.lang.code(), "de");
+    assert!(!detected.assumed);
+    let request = requests.recv().expect("one request");
+    assert!(request.starts_with("POST /detect HTTP/1.1"), "{request}");
+    assert!(request.contains(r#""lines":["Hallo","Welt"]"#), "{request}");
+    assert!(
+        !request.contains(r#""target""#),
+        "detection must not be a translate request: {request}"
+    );
+}
+
+#[test]
+fn a_sidecar_without_detect_keeps_one_pass_ocr_working() {
+    // An older installed sidecar predates `/detect`; the capture must still
+    // translate rather than fail because the accuracy pass is missing.
+    let (url, requests) = serve(vec![http_response(
+        "404 Not Found",
+        r#"{"error":"no such endpoint: /detect"}"#,
+    )]);
+    let translator = LocalTranslator::new(url);
+    assert_eq!(translator.detect_source(&["Hallo"]).unwrap(), None);
+    let request = requests.recv().expect("one request");
+    assert!(request.starts_with("POST /detect HTTP/1.1"), "{request}");
+}
+
+#[test]
+fn an_assumed_detection_is_flagged_for_the_two_pass_decision() {
+    let (url, _requests) = serve(vec![http_response(
+        "200 OK",
+        r#"{"source":"en","source_confidence":0.12,"detected":false,"fallback":true}"#,
+    )]);
+    let translator = LocalTranslator::new(url);
+    let detected = translator
+        .detect_source(&["Hallo"])
+        .unwrap()
+        .expect("a fallback language");
+    assert!(
+        detected.assumed,
+        "an assumed language must not narrow the OCR packs"
+    );
+}
+
+#[test]
+fn an_unreachable_sidecar_is_one_clear_line_for_detection_too() {
+    let error = LocalTranslator::new("http://127.0.0.1:9")
+        .detect_source(&["Hallo"])
+        .unwrap_err();
+    assert!(
+        error
+            .to_string()
+            .starts_with("translation engine not available: cannot reach the local NLLB sidecar"),
+        "{error}"
+    );
+}

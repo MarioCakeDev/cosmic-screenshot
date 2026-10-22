@@ -6,7 +6,7 @@
 
 use std::sync::Mutex;
 
-use crate::{Batch, Lang, Provider, TranslateError, Translated, Translator};
+use crate::{Batch, Detected, Lang, Provider, TranslateError, Translated, Translator};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct RecordedCall {
@@ -20,6 +20,7 @@ pub struct FakeTranslator {
     prefix: String,
     detected: Option<Lang>,
     assumed: bool,
+    detection: Option<Detected>,
     calls: Mutex<Vec<RecordedCall>>,
 }
 
@@ -30,6 +31,7 @@ impl FakeTranslator {
             prefix: prefix.into(),
             detected: Lang::parse("en"),
             assumed: false,
+            detection: None,
             calls: Mutex::new(Vec::new()),
         }
     }
@@ -48,6 +50,25 @@ impl FakeTranslator {
     /// Report that the source was assumed from a low-confidence detection.
     pub fn assuming_the_default_source(mut self) -> Self {
         self.assumed = true;
+        self
+    }
+
+    /// Answer [`Translator::detect_source`] with `lang`, as the sidecar's
+    /// `/detect` would. Without it the fake cannot detect, like DeepL.
+    pub fn with_detection(mut self, lang: &str) -> Self {
+        self.detection = Some(Detected {
+            lang: Lang::parse(lang).expect("test language is supported"),
+            assumed: false,
+        });
+        self
+    }
+
+    /// Answer detection with a low-confidence fallback, as the sidecar does.
+    pub fn assuming_the_source_on_detection(mut self, lang: &str) -> Self {
+        self.detection = Some(Detected {
+            lang: Lang::parse(lang).expect("test language is supported"),
+            assumed: true,
+        });
         self
     }
 
@@ -89,6 +110,10 @@ impl Translator for FakeTranslator {
                 .collect(),
             source_assumed: self.assumed,
         })
+    }
+
+    fn detect_source(&self, _texts: &[&str]) -> Result<Option<Detected>, TranslateError> {
+        Ok(self.detection)
     }
 }
 

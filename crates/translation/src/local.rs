@@ -16,7 +16,7 @@ use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 
-use crate::{Batch, Lang, Provider, TranslateError, Translated, Translator};
+use crate::{Batch, Detected, Lang, Provider, TranslateError, Translated, Translator};
 
 /// Base URL of the sidecar; the systemd user unit listens on the default.
 pub const URL_VARIABLE: &str = "COSMIC_SCREENSHOT_NLLB_URL";
@@ -74,6 +74,32 @@ pub fn parse_response(body: &str, requested: usize) -> Result<Batch, TranslateEr
         items,
         source_assumed: parsed.fallback,
     })
+}
+
+#[derive(Deserialize)]
+struct DetectionBody {
+    #[serde(default)]
+    source: Option<String>,
+    /// The sidecar could not trust detection and used its default source.
+    #[serde(default)]
+    fallback: bool,
+}
+
+/// Parse a `/detect` response into the language the engine named.
+///
+/// An unknown or missing code is `None`: the pipeline then keeps its one-pass
+/// OCR instead of narrowing to a pack it cannot name.
+pub fn parse_detection(body: &str) -> Result<Option<Detected>, TranslateError> {
+    let parsed: DetectionBody =
+        serde_json::from_str(body).map_err(|error| TranslateError::Decode(error.to_string()))?;
+    Ok(parsed
+        .source
+        .as_deref()
+        .and_then(Lang::parse)
+        .map(|lang| Detected {
+            lang,
+            assumed: parsed.fallback,
+        }))
 }
 
 /// Turn a non-success status into the one line the UI prints.
@@ -245,6 +271,35 @@ impl Translator for LocalTranslator {
             Err(ureq::Error::Transport(_)) => Err(self.unreachable()),
         }
     }
+
+    fn detect_source(&self, texts: &[&str]) -> Result<Option<Detected>, TranslateError> {
+        if texts.is_empty() {
+            return Ok(None);
+        }
+        let url = format!("{}/detect", self.base_url);
+        let response = self
+            .agent
+            .post(&url)
+            .set("Content-Type", "application/json")
+            .send_json(serde_json::json!({ "lines": texts }));
+
+        match response {
+            Ok(response) => {
+                let body = response
+                    .into_string()
+                    .map_err(|error| TranslateError::Decode(error.to_string()))?;
+                parse_detection(&body)
+            }
+            // A sidecar installed before two-pass OCR has no `/detect`. One OCR
+            // pass is the old, working behaviour: degrade, do not fail.
+            Err(ureq::Error::Status(404, _)) => Ok(None),
+            Err(ureq::Error::Status(status, response)) => {
+                let body = response.into_string().unwrap_or_default();
+                Err(map_status(status, &body))
+            }
+            Err(ureq::Error::Transport(_)) => Err(self.unreachable()),
+        }
+    }
 }
 
 impl std::fmt::Debug for LocalTranslator {
@@ -304,6 +359,43 @@ mod tests {
             error.to_string().contains("1 translations for 3"),
             "{error}"
         );
+    }
+
+    #[test]
+    fn a_detection_names_the_source_and_whether_it_was_trusted() {
+        let detected = parse_detection(
+            r#"{"source":"de","source_confidence":0.991,"detected":true,"fallback":false}"#,
+        )
+        .unwrap()
+        .expect("a detection");
+        assert_eq!(detected.lang.code(), "de");
+        assert!(!detected.assumed);
+    }
+
+    #[test]
+    fn a_fallback_detection_is_marked_assumed() {
+        let detected = parse_detection(
+            r#"{"source":"en","source_confidence":0.12,"detected":false,"fallback":true}"#,
+        )
+        .unwrap()
+        .expect("a detection");
+        assert_eq!(detected.lang.code(), "en");
+        assert!(
+            detected.assumed,
+            "an assumed language must not narrow the OCR packs"
+        );
+    }
+
+    #[test]
+    fn an_unknown_detection_language_is_no_detection() {
+        assert!(parse_detection(r#"{"source":"tlh"}"#).unwrap().is_none());
+        assert!(parse_detection(r#"{}"#).unwrap().is_none());
+    }
+
+    #[test]
+    fn a_malformed_detection_is_a_decode_error() {
+        let error = parse_detection("not json").unwrap_err();
+        assert!(matches!(error, TranslateError::Decode(_)), "{error}");
     }
 
     #[test]
