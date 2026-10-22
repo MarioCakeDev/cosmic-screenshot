@@ -118,9 +118,11 @@ So the pipeline reads the capture twice:
    those lines.
 
 The second pass costs one extra Tesseract run (~200 ms) and removes a whole
-class of wrong translations. If the second pass fails or finds nothing (for
-example a capture that mixes scripts), the first pass is used and translation
-continues — the accuracy pass is never a requirement.
+class of wrong translations. If it fails or finds no text, the first pass is
+used and translation continues — the accuracy pass is never a requirement. A
+capture that mixes scripts can come back **partial**: the detected script is
+re-read, and lines in another script keep their original pixels (untranslated,
+not covered).
 
 `--ocr-langs eng+deu` (or `COSMIC_SCREENSHOT_OCR_LANGS`) is the manual override:
 choosing packs explicitly turns the second pass off, because then the user, not

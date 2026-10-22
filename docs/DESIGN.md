@@ -159,7 +159,8 @@ is pure and fixture-tested.
   once misreads accents (`für` → `fur`, `Rücksendungen` → `Ricksendungen`) and
   the translation follows the misreading. `--ocr-langs eng+deu` /
   `COSMIC_SCREENSHOT_OCR_LANGS` is the manual override and turns the second pass
-  off. A failed or empty second pass keeps the first reading.
+  off. A failed or empty second pass keeps the first reading; a mixed-script
+  capture can come back partial, with the other script's lines left untranslated.
 - `tesseract` missing is `OCR engine not configured: …`, one line, not a panic.
 
 ## Overlay

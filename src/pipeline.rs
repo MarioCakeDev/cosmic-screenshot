@@ -94,18 +94,34 @@ pub struct Job {
 
 impl Job {
     pub fn new(input: impl Into<PathBuf>, target: Lang) -> Self {
+        // The environment can choose the packs too; a chosen list is the user's
+        // decision, and the preview window must honour it just as the headless
+        // path does. Resolve it once, then build from the resolved value.
+        let from_env = std::env::var(ocr::LANGUAGES_VARIABLE).ok();
+        Self::with_ocr_override(input, target, explicit_languages(None, from_env.as_deref()))
+    }
+
+    /// `languages` is the already-resolved override: `None` means the full pack
+    /// list, `Some` means the user chose exactly those packs. Taking it as a
+    /// parameter keeps the decision testable without mutating the environment.
+    fn with_ocr_override(
+        input: impl Into<PathBuf>,
+        target: Lang,
+        languages: Option<String>,
+    ) -> Self {
         let input = input.into();
         let output = default_output(&input);
+        let ocr = match &languages {
+            Some(chosen) => ocr::Config::default().with_languages(chosen.clone()),
+            None => ocr::Config::default().with_languages(lang::all_ocr_languages()),
+        };
         Self {
             input,
             output,
             target,
             source: None,
-            ocr: ocr_config(None),
-            // The environment can choose the packs too; a chosen list is the
-            // user's decision, and the preview window must honour it just as
-            // the headless path does.
-            two_pass_ocr: ocr_languages_override(None).is_none(),
+            ocr,
+            two_pass_ocr: languages.is_none(),
             options: Options::default(),
         }
     }
@@ -192,9 +208,10 @@ fn recognize_blocks(
     };
 
     let narrowed = job.ocr.clone().with_languages(languages);
-    // A narrower pack can find nothing (a mixed-script capture) or be missing
-    // from the install. The first pass already suffices then — the second pass
-    // is an accuracy gain, never a requirement.
+    // A narrower pack can find nothing, or be missing from the install; the
+    // first pass already suffices then. A mixed-script capture can come back
+    // partial: the other script's lines keep their original pixels, which is
+    // safe but leaves them untranslated.
     match recognize(&narrowed) {
         Ok(second) if !second.is_empty() => Ok((second, detected.map(|detected| detected.lang))),
         _ => Ok((blocks, None)),
@@ -459,9 +476,24 @@ mod tests {
     }
 
     #[test]
-    fn a_new_job_reads_the_capture_twice() {
-        let job = Job::new("/tmp/shot.png", Lang::parse("en").unwrap());
+    fn a_job_without_chosen_packs_reads_twice_with_every_pack() {
+        let job = Job::with_ocr_override("/tmp/shot.png", Lang::parse("en").unwrap(), None);
+        assert_eq!(job.ocr.languages, lang::all_ocr_languages());
         assert!(job.two_pass_ocr);
+    }
+
+    #[test]
+    fn a_job_with_chosen_packs_reads_once_with_exactly_those_packs() {
+        let job = Job::with_ocr_override(
+            "/tmp/shot.png",
+            Lang::parse("en").unwrap(),
+            Some("eng+deu".to_string()),
+        );
+        assert_eq!(job.ocr.languages, "eng+deu");
+        assert!(
+            !job.two_pass_ocr,
+            "the preview must not override packs the user chose"
+        );
     }
 
     #[test]
