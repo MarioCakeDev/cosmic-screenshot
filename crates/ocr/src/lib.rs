@@ -437,8 +437,7 @@ impl Prepared {
         if scale == 1 {
             // Still decode once: it validates the capture before Tesseract is
             // asked to, and gives the dump its dimensions.
-            let opened =
-                image::open(image).map_err(|error| OcrError::Image(error.to_string()))?;
+            let opened = image::open(image).map_err(|error| OcrError::Image(error.to_string()))?;
             return Ok(Self {
                 path: image.to_path_buf(),
                 _temp: None,
@@ -528,11 +527,19 @@ fn run_pass(prepared: &Prepared, config: &Config, psm: u8) -> Result<Reading, Oc
     };
 
     if let Some(debug) = &config.debug {
+        // Diagnostics must never fail a capture the user asked for: a full
+        // disk loses the dump, not the translation.
         let stem = format!("psm{psm}");
-        let crop = debug.path(&format!("{stem}-crop.png"));
-        std::fs::copy(&prepared.path, &crop).map_err(|error| OcrError::Image(error.to_string()))?;
-        std::fs::write(debug.path(&format!("{stem}.tsv")), tsv.as_bytes())
-            .map_err(|error| OcrError::Image(error.to_string()))?;
+        let note = |result: Result<(), std::io::Error>| {
+            if let Err(error) = result {
+                eprintln!("cosmic-screenshot: could not write the OCR debug dump: {error}");
+            }
+        };
+        note(std::fs::copy(&prepared.path, debug.path(&format!("{stem}-crop.png"))).map(|_| ()));
+        note(std::fs::write(
+            debug.path(&format!("{stem}.tsv")),
+            tsv.as_bytes(),
+        ));
         let summary = format!(
             "languages: {}\npsm: {psm}\nscale: {}\ninput: {}x{} (enlarged {}x{})\nfound: {}\nkept: {}\ndropped (confidence < {}): {}\ndropped (unreadable): {}\nelapsed: {} ms\n",
             config.languages,
@@ -548,8 +555,7 @@ fn run_pass(prepared: &Prepared, config: &Config, psm: u8) -> Result<Reading, Oc
             reading.dropped_unreadable,
             started.elapsed().as_millis(),
         );
-        std::fs::write(debug.path(&format!("{stem}.txt")), summary)
-            .map_err(|error| OcrError::Image(error.to_string()))?;
+        note(std::fs::write(debug.path(&format!("{stem}.txt")), summary));
     }
 
     Ok(reading)
