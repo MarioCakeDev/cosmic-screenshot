@@ -67,6 +67,9 @@ pub struct Applied {
     pub translated: usize,
     /// Lines left exactly as they were because they are code, not prose.
     pub skipped_code: usize,
+    /// Lines the opposite-polarity pass recovered from a block the crop's own
+    /// polarity had folded into the background.
+    pub recovered: usize,
     pub report: overlay::Report,
     pub detected_source: Option<Lang>,
     /// The source language came from a low-confidence fallback, not detection.
@@ -97,6 +100,9 @@ impl Applied {
             "found {}, kept {}, translated {}, drawn {}",
             self.found, self.kept, self.translated, self.report.drawn
         );
+        if self.recovered > 0 {
+            counts.push_str(&format!(" · {} recovered", self.recovered));
+        }
         if self.skipped_code > 0 {
             counts.push_str(&format!(" · {} code line(s) left as-is", self.skipped_code));
         }
@@ -238,6 +244,7 @@ pub fn translate_canvas(
     applied.found = reading.found;
     applied.kept = reading.kept();
     applied.blocks = reading.kept();
+    applied.recovered = reading.recovered;
     applied.debug_dir = debug_dir.clone();
 
     trace.push(format!(
@@ -250,6 +257,12 @@ pub fn translate_canvas(
         reading.dropped_low_confidence,
         reading.dropped_unreadable
     ));
+    if applied.recovered > 0 {
+        trace.push(format!(
+            "opposite polarity: {} line(s) recovered from a block the crop's own polarity had folded away",
+            applied.recovered
+        ));
+    }
     trace.push(format!(
         "result: {} · {}",
         applied.counts(),
@@ -557,6 +570,7 @@ pub fn apply(
         kept: blocks.len(),
         translated: written,
         skipped_code,
+        recovered: 0,
         report,
         detected_source,
         source_assumed,

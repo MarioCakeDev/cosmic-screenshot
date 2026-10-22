@@ -180,6 +180,22 @@ is pure and fixture-tested.
   `Advancements` comes back as `AYancernrentS` on the raw pixels and reads
   correctly binarised. `COSMIC_SCREENSHOT_OCR_BINARIZE=0` and
   `COSMIC_SCREENSHOT_OCR_THRESHOLD` exist for tuning.
+- That polarity is decided **once per crop**, and a capture can hold both
+  themes: a selected passage is a light block with dark text inside a dark page.
+  The page's paper names the crop, so the passage came out as one solid bar and
+  its lines never reached Tesseract — a whole block left untranslated. After the
+  first pass, rows that no recognised block covers and whose pixels sit on the
+  other side of the crop's paper (by `255 − threshold`) are grouped into **flat
+  bands**: consecutive rows whose dominant opposite colour stays within 16 luma
+  levels. Each band (at most four, and only when the crop's own polarity read a
+  line outside it) is binarised again with the polarity flipped, read on its own
+  at the chosen psm, and only the lines that land inside it and duplicate none
+  of the first pass are added. A photo, an avatar or an icon changes colour from
+  row to row and never forms a band, so texture is not read upside down. The
+  counts stay honest: the extra pass's `found`/dropped lines are added, and
+  `Reading::recovered` names the lines that came back. The debug dump writes
+  `psm6-opposite-1-crop.png`/`.tsv`/`.txt` beside the first pass.
+  `Config::retry_opposite_polarity` (default on) turns it off for tuning.
 - The binarised crop is enlarged 2× with **nearest neighbour** (not Lanczos),
   because a pixel font is already a grid of hard-edged blocks and interpolation
   turns each stroke into a grey ramp the threshold erodes unevenly (`B`/`G`/`F`
@@ -230,10 +246,21 @@ which makes it deterministic and testable:
    taller). The margin hides ascenders, descenders and antialiasing without
    eating the neighbouring line — and because the box starts at the first word,
    it no longer starts at the button border.
-2. **Paper colour**: median colour of the ring just outside the cover — a median,
-   not a mean, so a neighbouring glyph or border cannot tint the patch.
-3. **Ink colour**: median of the pixels inside the box that differ from the paper
-   colour by ≥ 40 luminance; falls back to black/white on a blank box.
+2. **Paper colour**: the **dominant** (modal) colour of the ring just outside the
+   cover, in 16-level buckets. A box that straddles two papers — a selected
+   passage and the page — has two colours on its ring, and their median is a
+   mid-grey that is on screen nowhere; the translation then had almost no
+   contrast with its own cover. The mode is one of the two real colours.
+3. **Ink colour**: the tenth percentile, from the side facing away from the
+   paper, of the pixels inside the box that differ from the paper by ≥ 40
+   luminance — the glyph core, not its antialiased edge (a median of those
+   pixels painted a translation that peaked at 168 where the page's text peaked
+   at 230). Falls back to black/white on a blank box.
+   The final pair is then checked against **WCAG AA (4.5:1)**: if the sampled
+   ink is too close to the fill, the readable extreme replaces it; if even
+   black/white cannot contrast with a mid-grey fill, the fill itself moves away
+   from the ink until the pair reads. A cover may therefore differ from the
+   original paper rather than hide its own text.
 4. **Fit**: greedy word wrap (per-character for scripts without spaces), then the
    largest font size whose wrapped block fits the box. A single line is measured
    as one em, not one line advance, so it keeps the original's scale. If even the

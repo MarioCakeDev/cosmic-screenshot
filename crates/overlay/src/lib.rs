@@ -395,9 +395,10 @@ pub fn overlay(
             continue;
         }
 
-        // Sample colours before the original glyphs are painted over.
-        let background = color::background(canvas, cover);
-        let foreground = color::foreground(canvas, cover, background, options.min_contrast);
+        // Sample colours before the original glyphs are painted over. The pair
+        // is checked against WCAG contrast here, not left to chance: a box that
+        // spans two papers used to get a mid-grey cover and light ink on it.
+        let (background, foreground) = color::pair(canvas, cover, options.min_contrast);
         fill(canvas, cover, background);
 
         if block.text.trim().is_empty() {
