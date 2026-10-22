@@ -56,8 +56,15 @@ struct Args {
     #[clap(short, long)]
     save_dir: Option<PathBuf>,
     /// Translate the captured area into LANGUAGE (e.g. de, ja) and save the
-    /// result
-    #[arg(long, value_name = "LANGUAGE")]
+    /// result. Without a value, the language last picked in the portal dialog
+    /// is used, else the session language, else English
+    #[arg(
+        long,
+        visible_alias = "target-language",
+        value_name = "LANGUAGE",
+        num_args = 0..=1,
+        default_missing_value = ""
+    )]
     translate: Option<String>,
     /// Translate an existing image instead of capturing one
     #[arg(long, value_name = "FILE")]
@@ -122,7 +129,11 @@ async fn run(args: Args) -> Result<(), String> {
     };
     let translation = match &args.translate {
         Some(requested) => {
-            let info = resolve_language(requested)?;
+            let info = if requested.trim().is_empty() {
+                default_target()
+            } else {
+                resolve_language(requested)?
+            };
             let translator = pipeline::translator_from_env().map_err(|error| error.to_string())?;
             Some((info, translator))
         }
@@ -196,6 +207,16 @@ fn resolve_language(requested: &str) -> Result<&'static LangInfo, String> {
             lang::supported_list()
         )
     })
+}
+
+/// The target when `--translate` is given without a language: the one last
+/// picked in the dialog, else the session language, else English — the same
+/// order the dialog itself opens with.
+fn default_target() -> &'static LangInfo {
+    lang::remembered_target()
+        .or_else(lang::from_locale)
+        .or_else(|| lang::find("en"))
+        .expect("the language table always has English")
 }
 
 fn resolve_source_language(requested: &str) -> Result<cosmic_screenshot_translation::Lang, String> {

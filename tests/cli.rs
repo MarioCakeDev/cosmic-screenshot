@@ -38,12 +38,7 @@ fn the_default_engine_without_a_sidecar_fails_with_one_clear_line() {
     let image = sample_image(directory.path());
 
     let output = command()
-        .args([
-            "--input",
-            image.to_str().unwrap(),
-            "--translate",
-            "de",
-        ])
+        .args(["--input", image.to_str().unwrap(), "--translate", "de"])
         .env("COSMIC_SCREENSHOT_NLLB_URL", "http://127.0.0.1:9")
         .output()
         .expect("run the binary");
@@ -71,12 +66,7 @@ fn deepl_without_a_key_fails_with_one_clear_line() {
     let image = sample_image(directory.path());
 
     let output = command()
-        .args([
-            "--input",
-            image.to_str().unwrap(),
-            "--translate",
-            "de",
-        ])
+        .args(["--input", image.to_str().unwrap(), "--translate", "de"])
         .env("TRANSLATE_PROVIDER", "deepl")
         .output()
         .expect("run the binary");
@@ -98,12 +88,7 @@ fn an_unknown_language_lists_the_supported_ones() {
     let image = sample_image(directory.path());
 
     let output = command()
-        .args([
-            "--input",
-            image.to_str().unwrap(),
-            "--translate",
-            "klingon",
-        ])
+        .args(["--input", image.to_str().unwrap(), "--translate", "klingon"])
         .output()
         .expect("run the binary");
 
@@ -150,12 +135,7 @@ fn an_unknown_provider_is_one_line() {
     let image = sample_image(directory.path());
 
     let output = command()
-        .args([
-            "--input",
-            image.to_str().unwrap(),
-            "--translate",
-            "de",
-        ])
+        .args(["--input", image.to_str().unwrap(), "--translate", "de"])
         .env("TRANSLATE_PROVIDER", "google")
         .output()
         .expect("run the binary");
@@ -171,6 +151,43 @@ fn an_unknown_provider_is_one_line() {
 }
 
 #[test]
+fn translate_without_a_language_asks_for_the_remembered_one() {
+    // An empty XDG_CONFIG_HOME means "nothing stored yet": the run must fall
+    // back to the locale/English and fail on the engine, never on an empty
+    // language argument.
+    let directory = tempfile::tempdir().expect("tempdir");
+    let image = sample_image(directory.path());
+
+    let output = command()
+        .args(["--input", image.to_str().unwrap(), "--translate"])
+        .env("XDG_CONFIG_HOME", directory.path())
+        .env("COSMIC_SCREENSHOT_NLLB_URL", "http://127.0.0.1:9")
+        .output()
+        .expect("run the binary");
+
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert_eq!(output.status.code(), Some(1), "{output:?}");
+    assert!(
+        stderr.starts_with("translation engine not available"),
+        "a bare --translate must resolve a language, not fail on it: {stderr}"
+    );
+}
+
+#[test]
+fn target_language_is_the_same_option_as_translate() {
+    let output = Command::new(binary())
+        .args(["--target-language", "tlh"])
+        .output()
+        .expect("run the binary");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert_eq!(output.status.code(), Some(1));
+    assert!(
+        stderr.contains("unsupported target language 'tlh'"),
+        "{stderr}"
+    );
+}
+
+#[test]
 fn help_documents_the_new_flags() {
     let output = Command::new(binary())
         .arg("--help")
@@ -179,6 +196,7 @@ fn help_documents_the_new_flags() {
     let stdout = String::from_utf8_lossy(&output.stdout);
     for flag in [
         "--translate",
+        "--target-language",
         "--input",
         "--output",
         "--source-lang",
