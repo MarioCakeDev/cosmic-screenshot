@@ -10,6 +10,11 @@ back over the original text.
   (upstream history kept).
 - Installs as a **separate binary**, `cosmic-screenshot-translate`; the stock
   `cosmic-screenshot` package is untouched.
+- The **Translate button in the screenshot dialog** is not in this repository:
+  it lives in the `xdg-desktop-portal-cosmic` fork
+  ([`MarioCakeDev/xdg-desktop-portal-cosmic`](https://github.com/MarioCakeDev/xdg-desktop-portal-cosmic)),
+  which owns that overlay and its toolbar. Both front ends share the engine in
+  `crates/engine`, so there is exactly one copy of the OCR/overlay pipeline.
 - Translation runs on the machine: no API key, no cloud, no per-character cost.
   NLLB-200 is a dedicated NMT model, not an LLM — no Ollama, no prompts.
 - Reads the capture twice: all Tesseract packs first to detect the language,
@@ -22,9 +27,6 @@ back over the original text.
 ## Use
 
 ```sh
-# select a region, then get a preview with a Translate button and language pickers
-cosmic-screenshot-translate
-
 # headless: select a region, translate it, print the saved path
 cosmic-screenshot-translate --translate de
 
@@ -63,8 +65,8 @@ translation engine not available: cannot reach the local NLLB sidecar at http://
 Target languages: `en de fr es it pt nl pl ru uk tr cs sv da fi el hu ro ja zh
 ko ar id`. The **source** language is detected per capture (fastText on all OCR
 lines joined); if detection is not confident it falls back to English and says
-so. `--source-lang` overrides it, and the preview window has a **From** picker
-next to **Translate to**.
+so. `--source-lang` overrides it on the command line; the dialog always
+auto-detects.
 
 ## Build on maripop
 

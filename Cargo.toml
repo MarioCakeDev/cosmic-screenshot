@@ -1,5 +1,5 @@
 [workspace]
-members = [".", "crates/ocr", "crates/overlay", "crates/translation"]
+members = [".", "crates/engine", "crates/ocr", "crates/overlay", "crates/translation"]
 resolver = "3"
 
 [package]
@@ -12,10 +12,6 @@ description = "Screenshot utility that translates the captured text in place (lo
 name = "cosmic-screenshot-translate"
 path = "src/main.rs"
 
-[features]
-default = ["gui"]
-gui = ["dep:iced"]
-
 [dependencies]
 ashpd = { version = "0.12", default-features = false, features = ["tokio"] }
 jiff = "0.2"
@@ -24,18 +20,11 @@ tokio = { version = "1.52.1", default-features = false, features = ["macros"] }
 clap = { version = "4.6.1", features = ["derive"] }
 zbus = { version = "5", default-features = false }
 
-# Translation pipeline
+# Translation pipeline (one copy, shared with the portal dialog fork)
+cosmic-screenshot-engine = { path = "crates/engine" }
 cosmic-screenshot-ocr = { path = "crates/ocr" }
 cosmic-screenshot-overlay = { path = "crates/overlay" }
 cosmic-screenshot-translation = { path = "crates/translation" }
-
-# Preview window (the Translate button + target-language picker)
-iced = { version = "0.13", default-features = false, features = [
-    "advanced",
-    "image",
-    "tiny-skia",
-    "tokio",
-], optional = true }
 
 # Internationalization
 i18n-embed = { version = "0.16", features = [

@@ -1,8 +1,13 @@
 //! `cosmic-screenshot-translate`
 //!
-//! Captures a region through the XDG desktop portal (the stock selection UI),
-//! then either translates it immediately (`--translate <language>`) or opens a
-//! preview window with a Translate button and a target-language picker.
+//! Captures a region through the XDG desktop portal and translates the captured
+//! text in place (`--translate <language>`, source auto-detected), or translates
+//! an image it is given.
+//!
+//! The dialog with the Translate button is not here: it lives in
+//! `xdg-desktop-portal-cosmic`, which owns the screenshot overlay and its
+//! toolbar. This binary and that dialog share one engine
+//! (`crates/engine`), so the CLI is the headless half of the same feature.
 
 use ashpd::desktop::screenshot::Screenshot;
 use clap::{ArgAction, Parser};
@@ -51,7 +56,7 @@ struct Args {
     #[clap(short, long)]
     save_dir: Option<PathBuf>,
     /// Translate the captured area into LANGUAGE (e.g. de, ja) and save the
-    /// result, without opening the preview window
+    /// result
     #[arg(long, value_name = "LANGUAGE")]
     translate: Option<String>,
     /// Translate an existing image instead of capturing one
@@ -60,15 +65,9 @@ struct Args {
     /// Where to write the translated image (default: <capture>.translated.png)
     #[arg(long, value_name = "FILE")]
     output: Option<PathBuf>,
-    /// Target language preselected in the preview window
-    #[arg(long, value_name = "LANGUAGE")]
-    target_language: Option<String>,
     /// Source language of the captured text (default: detect it)
     #[arg(long, value_name = "LANGUAGE")]
     source_lang: Option<String>,
-    /// Never open the preview window
-    #[arg(long)]
-    no_gui: bool,
     /// Tesseract -l value for the source languages (e.g. eng+deu); choosing it
     /// also turns off the automatic second OCR pass
     #[arg(long, value_name = "LIST")]
@@ -119,12 +118,6 @@ async fn run(args: Args) -> Result<(), String> {
     let source = match &args.source_lang {
         Some(requested) if requested.trim().eq_ignore_ascii_case("auto") => None,
         Some(requested) => Some(resolve_source_language(requested)?),
-        None => None,
-    };
-    // Validate the preview window's initial target here too: an invalid value
-    // must not cost a portal capture and print a path first.
-    let gui_target = match &args.target_language {
-        Some(requested) => Some(resolve_language(requested)?),
         None => None,
     };
     let translation = match &args.translate {
@@ -184,24 +177,6 @@ async fn run(args: Args) -> Result<(), String> {
     }
 
     println!("{}", path.display());
-
-    #[cfg(feature = "gui")]
-    if !args.no_gui && args.interactive {
-        let initial = match gui_target {
-            Some(info) => info,
-            None => lang::from_locale()
-                .unwrap_or_else(|| lang::find("en").expect("the language table contains English")),
-        };
-        let request = cosmic_screenshot::gui::Request {
-            image: path.clone(),
-            initial,
-            initial_source: source,
-            save_dir: args.save_dir.clone(),
-        };
-        cosmic_screenshot::gui::run(request)
-            .map_err(|error| format!("could not open the preview window: {error}"))?;
-        return Ok(());
-    }
 
     if args.notify {
         notify(&path.display().to_string()).await;

@@ -1,7 +1,8 @@
 //! The pipeline in isolation: OCR blocks in, painted canvas out, with the fake
 //! translator standing in for the real engine.
 
-use cosmic_screenshot::pipeline::{self, PipelineError};
+use cosmic_screenshot_engine as pipeline;
+use cosmic_screenshot_engine::Error as PipelineError;
 use cosmic_screenshot_ocr::{Bbox, TextBlock};
 use cosmic_screenshot_overlay::{Canvas, Options};
 use cosmic_screenshot_translation::Lang;

@@ -327,9 +327,9 @@ NLLB has no detector — this is work DeepL used to do for free. fastText
 `lid.176.ftz` runs **once per capture**, on all OCR lines joined together:
 single short lines are ambiguous. Below the confidence threshold (`0.4`) or on a
 label the table does not know, the sidecar falls back to English and reports
-`"detected": false` with `"fallback": true`; the notification and the preview
+`"detected": false` with `"fallback": true`; the notification and the dialog
 status then say **English (assumed)** rather than presenting it as a detection.
-`--source-lang de` and the preview window's **From** picker skip detection
+`--source-lang de` skips detection entirely
 entirely (`detected` and `fallback` are both false, and the chosen language is
 shown as the source). A trusted detection also drives the second OCR pass
 ([Two-pass OCR](#two-pass-ocr)); a low-confidence fallback never does.

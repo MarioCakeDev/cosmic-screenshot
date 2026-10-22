@@ -43,7 +43,6 @@ fn the_default_engine_without_a_sidecar_fails_with_one_clear_line() {
             image.to_str().unwrap(),
             "--translate",
             "de",
-            "--no-gui",
         ])
         .env("COSMIC_SCREENSHOT_NLLB_URL", "http://127.0.0.1:9")
         .output()
@@ -77,7 +76,6 @@ fn deepl_without_a_key_fails_with_one_clear_line() {
             image.to_str().unwrap(),
             "--translate",
             "de",
-            "--no-gui",
         ])
         .env("TRANSLATE_PROVIDER", "deepl")
         .output()
@@ -105,7 +103,6 @@ fn an_unknown_language_lists_the_supported_ones() {
             image.to_str().unwrap(),
             "--translate",
             "klingon",
-            "--no-gui",
         ])
         .output()
         .expect("run the binary");
@@ -133,7 +130,6 @@ fn an_unknown_source_language_is_rejected_before_the_capture() {
             "de",
             "--source-lang",
             "klingon",
-            "--no-gui",
         ])
         .output()
         .expect("run the binary");
@@ -149,35 +145,6 @@ fn an_unknown_source_language_is_rejected_before_the_capture() {
 }
 
 #[test]
-fn an_unknown_preview_target_is_rejected_before_the_capture() {
-    let directory = tempfile::tempdir().expect("tempdir");
-    let image = sample_image(directory.path());
-
-    let output = command()
-        .args([
-            "--input",
-            image.to_str().unwrap(),
-            "--target-language",
-            "klingon",
-            "--no-gui",
-        ])
-        .output()
-        .expect("run the binary");
-
-    assert_eq!(output.status.code(), Some(1));
-    let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(
-        stderr.contains("unsupported target language 'klingon'"),
-        "{stderr}"
-    );
-    assert_eq!(stderr.lines().count(), 1, "{stderr}");
-    assert!(
-        String::from_utf8_lossy(&output.stdout).trim().is_empty(),
-        "the capture path must not be printed before an invalid target is rejected"
-    );
-}
-
-#[test]
 fn an_unknown_provider_is_one_line() {
     let directory = tempfile::tempdir().expect("tempdir");
     let image = sample_image(directory.path());
@@ -188,7 +155,6 @@ fn an_unknown_provider_is_one_line() {
             image.to_str().unwrap(),
             "--translate",
             "de",
-            "--no-gui",
         ])
         .env("TRANSLATE_PROVIDER", "google")
         .output()
@@ -215,7 +181,6 @@ fn help_documents_the_new_flags() {
         "--translate",
         "--input",
         "--output",
-        "--target-language",
         "--source-lang",
         "--ocr-langs",
     ] {

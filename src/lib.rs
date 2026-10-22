@@ -1,5 +1,2 @@
-pub mod lang;
+pub use cosmic_screenshot_engine::lang;
 pub mod pipeline;
-
-#[cfg(feature = "gui")]
-pub mod gui;

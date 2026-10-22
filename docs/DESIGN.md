@@ -12,9 +12,10 @@ nothing pushed to `pop-os`).
    (source language detected once per capture with fastText).
 4. Cover each original line with the sampled paper colour and draw the translation
    into the same box: lens-style, in place, not a side panel.
-5. Show the result in a preview window with a **Translate** button and a
-   **target-language picker**, and save the composited PNG — the saved image
-   contains the translated overlay, not the original text.
+5. Show the result in the dialog that is already open — the **Translate** button
+   sits in the screenshot toolbar next to Capture and the save destination, and
+   the preview image is replaced in place. Save/Copy then export the composited
+   PNG, not the original text.
 
 `--translate <language>` runs steps 1–4 headlessly and prints the output path.
 
@@ -24,15 +25,25 @@ nothing pushed to `pop-os`).
 screenshot and saves the file. **The area-selection UI is not in this repository**
 — it belongs to `xdg-desktop-portal-cosmic`, which the whole desktop uses.
 
-Adding the button to the portal would mean replacing a system-wide service (and
-would break the stock tool and other portal consumers). Instead the fork adds its
-own preview window on the captured region, and that window is where the
-Translate button and the language picker live. The portal still does what it is
-good at (region selection); everything from OCR onwards is ours.
+The button therefore lives in a fork of that portal
+([`MarioCakeDev/xdg-desktop-portal-cosmic`](https://github.com/MarioCakeDev/xdg-desktop-portal-cosmic)),
+in `src/widget/screenshot.rs`'s toolbar and `src/screenshot.rs`'s dialog state.
+There is no second window: the dialog already holds the captured image, the
+selection and the toolbar, and it already produces the bytes that Save and Copy
+export. The fork replaces the captured image's buffer before that export, so the
+exported file is the translated one by construction.
 
-The preview window uses `iced` with the `tiny-skia` software renderer: no GPU
-dependency, no libcosmic build (which would dominate a `target/` directory on the
-91 %-full maripop root filesystem), and it renders identically on any session.
+The earlier preview window (`src/gui.rs`, iced + tiny-skia) is gone. It read as a
+workaround because it was one.
+
+## Shared engine
+
+`crates/engine` is the single implementation of OCR → detect → translate →
+overlay. The CLI and the portal dialog both call
+`engine::translate_canvas`, so the two-pass OCR decision, the language table and
+the overlay call cannot drift between them. The portal vendors these crates
+(`crates/{ocr,overlay,translation,engine}`) with their source commit recorded in
+`crates/VENDORED.md`; `contrib/sync-engine.sh` refreshes them.
 
 ## Translation: vendor-neutral, local NLLB-200 by default
 
@@ -104,8 +115,8 @@ translation into the wrong language.
 - **Detection is new work DeepL hid:** NLLB has no detector. fastText
   `lid.176.ftz` (917 KB) runs **once per capture on all joined lines**; per-line
   detection is unreliable on short strings. Low confidence or an unknown label
-  falls back to English (reported as `detected: false`), and `--source-lang` /
-  the preview's **From** picker bypass detection entirely.
+  falls back to English (reported as `detected: false`), and `--source-lang`
+  bypasses detection entirely.
 - Chinese is the one language whose script fastText cannot report: it returns
   `zh` for both, so the sidecar picks Hans/Hant from the characters themselves.
 
@@ -191,9 +202,8 @@ package to install.
 
 ```
 src/main.rs        capture (portal), CLI flags, notify, headless --translate path
-src/gui.rs         preview window: Translate, Save, Close, From/To pickers
-src/pipeline.rs    capture file → OCR → translate → overlay → PNG (shared by both)
-src/lang.rs        one table: code, display name, Tesseract pack, overlay script
+src/pipeline.rs    capture file → engine → PNG (the CLI's job description)
+crates/engine      OCR → detect → translate → overlay, shared with the portal
 crates/translation local NLLB client, DeepL client, errors, fake translator for tests
 crates/ocr         tesseract runner + TSV parser
 crates/overlay     colour sampling, text fitting, in-place rendering
@@ -220,12 +230,12 @@ The sidecar has its own settings (`NLLB_MODEL_DIR`, `NLLB_TOKENIZER_DIR`,
 
 ## Known limits / follow-ups
 
-- The selection UI is the portal's; the Translate button acts on the region the
-  portal returned. A button *inside* the portal's selection overlay would require
-  replacing `xdg-desktop-portal-cosmic` — deliberately out of scope.
-- One-shot overlay: translating again re-runs from the original capture (the
-  translated file is never fed back in as input).
-- Copy-to-clipboard from the preview is not wired up yet; Save writes the file.
+- The Translate button replaces the dialog's captured image in place; there is
+  no separate preview. Save/Copy export whatever the dialog holds, so they
+  export the translated image.
+- One-shot overlay: translating again starts from the untouched capture (the
+  translated buffer is never fed back in as input), so changing the target
+  language does not compound two overlays.
 - **NLLB quality is good but literal, clearly below DeepL** ("Mit freundlichen
   Grüßen" → "With a friendly greeting"). The engine model is 669 MB on disk and
   about 1.5 GB RSS at the default beam 4 while resident. **Isolated UI labels

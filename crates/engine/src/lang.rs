@@ -16,6 +16,13 @@ pub struct LangInfo {
     pub script: Script,
 }
 
+/// The dropdown shows one row per language; its label is the name.
+impl std::fmt::Display for LangInfo {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.name)
+    }
+}
+
 /// Keep this in step with `cosmic_screenshot_translation::SUPPORTED`; the test
 /// at the bottom fails if the two drift apart.
 pub const LANGS: &[LangInfo] = &[
