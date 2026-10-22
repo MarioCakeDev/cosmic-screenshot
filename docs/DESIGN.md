@@ -153,7 +153,7 @@ never costs the user a region selection.
 `crates/ocr` shells out to the `tesseract` CLI:
 
 ```
-tesseract <image> stdout -l <langs> --psm 3 tsv
+tesseract <image> stdout -l <langs> --psm 6 tsv
 ```
 
 Why the CLI and not a binding: no leptonica/C build on maripop, language packs are
@@ -162,13 +162,18 @@ is pure and fixture-tested.
 
 - One `TextBlock` per **line** (words grouped by block/paragraph/line), bounding
   box = union of the word boxes, confidence = mean word confidence.
-- Tesseract is pointed at the crop enlarged 2× (Lanczos), because ~20 px UI
-  labels are below the size it reads best; boxes are mapped back to capture
-  pixels afterwards.
-- Three screenshot page-segmentation modes (sparse 11, uniform block 6, sparse
-  with orientation 12) are compared, and the reading with the most credible text
-  wins; a document-style pass (3) is the last resort when all three find nothing.
-  A screenshot is not a page.
+- The crop is binarised before recognition: grey, histogram stretch
+  (autocontrast), then a hard threshold at 150. Game UI is anti-aliased light
+  text on a dark panel, and Tesseract reads the soft edges as strokes —
+  `Advancements` comes back as `AYancernrentS` on the raw pixels and reads
+  correctly binarised. `COSMIC_SCREENSHOT_OCR_BINARIZE=0` and
+  `COSMIC_SCREENSHOT_OCR_THRESHOLD` exist for tuning.
+- The binarised crop is enlarged 2× (Lanczos), because ~20 px UI labels are
+  below the size Tesseract reads best; boxes are mapped back to capture pixels
+  afterwards.
+- One uniform-block pass (psm 6) reads the menu; a sparse-text pass (psm 11) is
+  tried only when it keeps fewer than two lines. The old three-mode tournament
+  cost six seconds and read no better than one binarised pass.
 - Lines below 30 % confidence are dropped, as are lines with fewer than two
   letters or mostly punctuation — a textured button must not become a
   translated line.
@@ -177,11 +182,13 @@ is pure and fixture-tested.
   that language's packs (plus `eng` for Latin/Cyrillic/Greek screens that mix
   English labels). Reading with the full list first let Tesseract pick an
   unrelated script per word (`Game` → `سس`). The probe is trusted only when it
-  kept real Latin text; otherwise the capture is read with every pack and the
-  better reading is kept. `--ocr-langs eng+deu` / `COSMIC_SCREENSHOT_OCR_LANGS`
-  is the manual override and skips the probe. A failed or empty main pass keeps
-  the probe; a mixed-script capture can come back partial, with the other
-  script's lines left untranslated.
+  kept real Latin text; the 24-pack read is a fallback reserved for a probe
+  that kept fewer than two lines or read no Latin text, because it costs about
+  ten times as much. A low-confidence but readable Latin probe is translated
+  as read, and the translator detects the source again. `--ocr-langs eng+deu` /
+  `COSMIC_SCREENSHOT_OCR_LANGS` is the manual override and skips the probe. A
+  failed or empty main pass keeps the probe; a mixed-script capture can come
+  back partial, with the other script's lines left untranslated.
 - `tesseract` missing is `OCR engine not configured: …`, one line, not a panic.
 
 ## Overlay
@@ -233,6 +240,8 @@ tests/             pipeline, CLI contract, picker ↔ NLLB code cross-check
 | `DEEPL_HOST` | `paid` | `paid` (`api.deepl.com`), `free` (a trailing `:fx` key selects it automatically), or a full base URL |
 | `DEEPL_TIMEOUT_SECS` | `30` | DeepL HTTP timeout |
 | `COSMIC_SCREENSHOT_OCR_LANGS` | all supported packs | Tesseract `-l` list; choosing it disables the automatic second OCR pass |
+| `COSMIC_SCREENSHOT_OCR_BINARIZE` | `1` | Binarise (grey → autocontrast → threshold) before recognition |
+| `COSMIC_SCREENSHOT_OCR_THRESHOLD` | `150` | Luma split point for the binarised crop, `1`–`254` |
 
 The sidecar has its own settings (`NLLB_MODEL_DIR`, `NLLB_TOKENIZER_DIR`,
 `NLLB_FASTTEXT_MODEL`, `NLLB_DEVICE`, `NLLB_COMPUTE_TYPE`, `NLLB_THREADS`,
