@@ -90,6 +90,20 @@ pub struct Outcome {
     pub blocks: usize,
     pub report: overlay::Report,
     pub detected_source: Option<Lang>,
+    /// The source language came from a low-confidence fallback, not detection.
+    pub source_assumed: bool,
+}
+
+impl Outcome {
+    /// "German", "English (assumed)", or "the source language" — one phrase for
+    /// the notification and the preview status.
+    pub fn source_label(&self) -> String {
+        match (self.detected_source, self.source_assumed) {
+            (Some(lang), true) => format!("{} (assumed)", lang.english_name()),
+            (Some(lang), false) => lang.english_name().to_string(),
+            (None, _) => "the source language".to_string(),
+        }
+    }
 }
 
 /// The result of translating blocks into an existing canvas.
@@ -97,6 +111,7 @@ pub struct Outcome {
 pub struct Applied {
     pub report: overlay::Report,
     pub detected_source: Option<Lang>,
+    pub source_assumed: bool,
 }
 
 pub fn run(job: &Job, translator: &dyn Translator) -> Result<Outcome, PipelineError> {
@@ -116,6 +131,7 @@ pub fn run(job: &Job, translator: &dyn Translator) -> Result<Outcome, PipelineEr
         blocks: blocks.len(),
         report: applied.report,
         detected_source: applied.detected_source,
+        source_assumed: applied.source_assumed,
     })
 }
 
@@ -145,6 +161,7 @@ pub fn apply(
     }
 
     let detected_source = batch.detected_source();
+    let source_assumed = batch.source_assumed;
     let translated: Vec<TranslatedBlock> = blocks
         .iter()
         .zip(batch.items)
@@ -163,6 +180,7 @@ pub fn apply(
     Ok(Applied {
         report,
         detected_source,
+        source_assumed,
     })
 }
 
@@ -197,3 +215,36 @@ impl fmt::Display for PipelineError {
 }
 
 impl std::error::Error for PipelineError {}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn outcome(detected: Option<Lang>, assumed: bool) -> Outcome {
+        Outcome {
+            output: PathBuf::from("/tmp/shot.translated.png"),
+            blocks: 1,
+            report: overlay::Report {
+                blocks: 1,
+                drawn: 1,
+                ..overlay::Report::default()
+            },
+            detected_source: detected,
+            source_assumed: assumed,
+        }
+    }
+
+    #[test]
+    fn the_source_label_distinguishes_assumed_from_detected() {
+        assert_eq!(
+            outcome(Some(Lang::parse("de").unwrap()), false).source_label(),
+            "German"
+        );
+        assert_eq!(
+            outcome(Some(Lang::parse("en").unwrap()), true).source_label(),
+            "English (assumed)",
+            "a low-confidence fallback must not look like a detection"
+        );
+        assert_eq!(outcome(None, false).source_label(), "the source language");
+    }
+}

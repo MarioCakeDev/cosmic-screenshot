@@ -36,6 +36,9 @@ struct ResponseBody {
     translations: Vec<String>,
     #[serde(default)]
     source: Option<String>,
+    /// The sidecar could not trust detection and used its default source.
+    #[serde(default)]
+    fallback: bool,
 }
 
 /// The JSON body sent to `/translate`, exposed for fixture tests.
@@ -67,7 +70,10 @@ pub fn parse_response(body: &str, requested: usize) -> Result<Batch, TranslateEr
             detected_source: detected,
         })
         .collect();
-    Ok(Batch { items })
+    Ok(Batch {
+        items,
+        source_assumed: parsed.fallback,
+    })
 }
 
 /// Turn a non-success status into the one line the UI prints.
@@ -274,11 +280,21 @@ mod tests {
     #[test]
     fn a_response_keeps_order_and_the_detected_source() {
         let body = r#"{"translations":["Hello","World"],"source":"de",
-            "source_confidence":0.995,"detected":true,"unchanged":false}"#;
+            "source_confidence":0.995,"detected":true,"fallback":false,"unchanged":false}"#;
         let batch = parse_response(body, 2).unwrap();
         assert_eq!(batch.items[0].text, "Hello");
         assert_eq!(batch.items[1].text, "World");
         assert_eq!(batch.detected_source().map(Lang::code), Some("de"));
+        assert!(!batch.source_assumed);
+    }
+
+    #[test]
+    fn a_low_confidence_fallback_is_not_reported_as_a_detection() {
+        let body = r#"{"translations":["Hello"],"source":"en",
+            "source_confidence":0.11,"detected":false,"fallback":true}"#;
+        let batch = parse_response(body, 1).unwrap();
+        assert!(batch.source_assumed, "the UI must be able to say 'assumed'");
+        assert_eq!(batch.detected_source().map(Lang::code), Some("en"));
     }
 
     #[test]

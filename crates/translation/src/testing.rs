@@ -19,6 +19,7 @@ pub struct RecordedCall {
 pub struct FakeTranslator {
     prefix: String,
     detected: Option<Lang>,
+    assumed: bool,
     calls: Mutex<Vec<RecordedCall>>,
 }
 
@@ -28,6 +29,7 @@ impl FakeTranslator {
         Self {
             prefix: prefix.into(),
             detected: Lang::parse("en"),
+            assumed: false,
             calls: Mutex::new(Vec::new()),
         }
     }
@@ -40,6 +42,12 @@ impl FakeTranslator {
     /// Report a different detected source language.
     pub fn with_detected_language(mut self, lang: &str) -> Self {
         self.detected = Lang::parse(lang);
+        self
+    }
+
+    /// Report that the source was assumed from a low-confidence detection.
+    pub fn assuming_the_default_source(mut self) -> Self {
+        self.assumed = true;
         self
     }
 
@@ -79,6 +87,7 @@ impl Translator for FakeTranslator {
                     detected_source: self.detected,
                 })
                 .collect(),
+            source_assumed: self.assumed,
         })
     }
 }

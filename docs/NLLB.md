@@ -160,6 +160,10 @@ python -m pytest -m real
 - If the detected/declared source equals the target, the lines come back
   unchanged with `"unchanged": true` (a German capture translated to German
   costs 0 ms instead of 0.6 s).
+- A request is one capture: at most **500 lines**, 20 000 characters per line and
+  1 MiB of JSON. Beyond that the sidecar answers 400 rather than splitting the
+  capture, because chunking would pay the per-call overhead again — a capture
+  that large is not a screenshot of a paragraph.
 - `GET /health` returns model path, device, compute type, thread count and the
   number of languages.
 

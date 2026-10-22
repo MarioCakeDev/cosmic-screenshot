@@ -111,6 +111,21 @@ fn an_unreachable_sidecar_is_one_clear_line() {
 }
 
 #[test]
+fn a_low_confidence_fallback_is_flagged() {
+    let (url, _requests) = serve(vec![http_response(
+        "200 OK",
+        r#"{"translations":["Hello"],"source":"en","source_confidence":0.12,
+            "detected":false,"fallback":true,"unchanged":false}"#,
+    )]);
+    let translator = LocalTranslator::new(url);
+    let batch = translator
+        .translate(&["Hallo"], Lang::parse("de").unwrap(), None)
+        .expect("translation succeeds");
+    assert!(batch.source_assumed, "the UI must be able to say 'assumed'");
+    assert_eq!(batch.detected_source().map(Lang::code), Some("en"));
+}
+
+#[test]
 fn a_missing_model_is_one_clear_line() {
     let (url, _requests) = serve(vec![http_response(
         "503 Service Unavailable",

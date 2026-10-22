@@ -109,7 +109,7 @@ translation into the wrong language.
 
 | Concern | Decision |
 |---|---|
-| Endpoint | `https://api.deepl.com` (paid) is the default; `DEEPL_HOST=free` is legacy only, any full URL accepted for proxies/tests |
+| Endpoint | `https://api.deepl.com` (paid) is the default; a key ending in `:fx` selects `https://api-free.deepl.com`; `DEEPL_HOST` overrides either; any full URL accepted for proxies/tests |
 | Key | `DEEPL_API_KEY`, read at runtime; never logged, never committed, redacted in `Debug` |
 | Not configured | `translation engine not configured: set DEEPL_API_KEY` — one line, exit 1, no capture taken |
 | Source language | omitted from the request; DeepL's `detected_source_language` is surfaced in the status |
@@ -202,7 +202,7 @@ tests/             pipeline, CLI contract, picker ↔ NLLB code cross-check
 | `COSMIC_SCREENSHOT_NLLB_URL` | `http://127.0.0.1:8765` | sidecar base URL |
 | `COSMIC_SCREENSHOT_NLLB_TIMEOUT_SECS` | `30` | sidecar HTTP timeout |
 | `DEEPL_API_KEY` | — | only for `TRANSLATE_PROVIDER=deepl` |
-| `DEEPL_HOST` | `paid` | `paid` (`api.deepl.com`), `free` (legacy accounts), or a full base URL |
+| `DEEPL_HOST` | `paid` | `paid` (`api.deepl.com`), `free` (a trailing `:fx` key selects it automatically), or a full base URL |
 | `DEEPL_TIMEOUT_SECS` | `30` | DeepL HTTP timeout |
 | `COSMIC_SCREENSHOT_OCR_LANGS` | all supported packs | Tesseract `-l` list |
 

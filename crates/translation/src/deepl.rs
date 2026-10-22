@@ -11,10 +11,10 @@ use serde::{Deserialize, Serialize};
 
 use crate::{Batch, Lang, Provider, TranslateError, Translated, Translator, plan_chunks};
 
-/// Legacy free-tier endpoint. DeepL no longer offers a free plan; the variant
-/// stays so an old `DEEPL_HOST=free` still resolves, but it is never the default.
+/// API Free plan endpoint (500k characters/month). Free-plan keys end in `:fx`
+/// and only work against this host.
 pub const FREE_HOST: &str = "https://api-free.deepl.com";
-/// Paid (DeepL API) endpoint — the default.
+/// Paid (DeepL API Pro) endpoint — the default for non-`:fx` keys.
 pub const PAID_HOST: &str = "https://api.deepl.com";
 
 pub const KEY_VARIABLE: &str = "DEEPL_API_KEY";
@@ -23,11 +23,12 @@ const TIMEOUT_VARIABLE: &str = "DEEPL_TIMEOUT_SECS";
 const DEFAULT_TIMEOUT_SECS: u64 = 30;
 
 /// Which DeepL endpoint to talk to. Getting this wrong is a 403, so it is
-/// explicit configuration, never inferred from the key. DeepL has no free tier
-/// any more, so the paid endpoint is the default.
+/// explicit configuration, never inferred from the key at request time. Without
+/// `DEEPL_HOST`, a key ending in `:fx` is a free-plan key and selects the free
+/// endpoint; every other key gets the paid endpoint.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub enum DeepLHost {
-    /// Legacy free-plan endpoint, only for accounts that still have one.
+    /// API Free plan (`api-free.deepl.com`); `:fx` keys.
     Free,
     #[default]
     Paid,
@@ -65,10 +66,21 @@ impl DeepLHost {
         }
     }
 
-    pub fn from_env() -> Result<Self, TranslateError> {
+    /// The host implied by the key when `DEEPL_HOST` is not set. DeepL's own
+    /// convention: free-plan keys end in `:fx`.
+    pub fn for_key(key: &str) -> Self {
+        if key.trim().ends_with(":fx") {
+            DeepLHost::Free
+        } else {
+            DeepLHost::Paid
+        }
+    }
+
+    /// `DEEPL_HOST` wins; otherwise derive the host from the key.
+    pub fn from_env_for_key(key: &str) -> Result<Self, TranslateError> {
         match std::env::var(HOST_VARIABLE) {
             Ok(value) if !value.trim().is_empty() => Self::parse(&value),
-            _ => Ok(DeepLHost::default()),
+            _ => Ok(Self::for_key(key)),
         }
     }
 }
@@ -120,7 +132,10 @@ pub fn parse_response(body: &str, requested: usize) -> Result<Batch, TranslateEr
             detected_source: normalise_language(&item.detected_source_language),
         })
         .collect();
-    Ok(Batch { items })
+    Ok(Batch {
+        items,
+        source_assumed: false,
+    })
 }
 
 /// DeepL answers with codes such as `EN`, `PT-PT`, `ZH`; map them onto the
@@ -138,7 +153,7 @@ pub fn map_status(status: u16, body: &str) -> TranslateError {
             detail: if detail.is_empty() {
                 "DeepL refused the key; check DEEPL_API_KEY and DEEPL_HOST".to_string()
             } else {
-                format!("{detail} (check DEEPL_API_KEY and DEEPL_HOST)")
+                format!("{detail} (check DEEPL_API_KEY and DEEPL_HOST; a free key ends in :fx)")
             },
         },
         456 => TranslateError::Quota {
@@ -208,7 +223,7 @@ impl DeepLTranslator {
             .ok_or(TranslateError::NotConfigured {
                 variable: KEY_VARIABLE,
             })?;
-        Ok(Self::new(DeepLHost::from_env()?, api_key))
+        Ok(Self::new(DeepLHost::from_env_for_key(&api_key)?, api_key))
     }
 
     pub fn endpoint(&self) -> String {
@@ -264,7 +279,11 @@ impl Translator for DeepLTranslator {
             let chunk = self.send_chunk(&texts[start..end], target, source)?;
             items.extend(chunk.items);
         }
-        Ok(Batch { items })
+        // DeepL detects the source itself and always answers with it.
+        Ok(Batch {
+            items,
+            source_assumed: false,
+        })
     }
 }
 
@@ -287,6 +306,15 @@ mod tests {
         assert_eq!(DeepLHost::default(), DeepLHost::Paid);
         assert_eq!(DeepLHost::default().base_url(), "https://api.deepl.com");
         assert!(DeepLHost::Free.base_url().starts_with("https://api-free"));
+    }
+
+    #[test]
+    fn a_free_key_selects_the_free_endpoint() {
+        assert_eq!(DeepLHost::for_key("0000:fx"), DeepLHost::Free);
+        assert_eq!(DeepLHost::for_key(" 0000:fx "), DeepLHost::Free);
+        assert_eq!(DeepLHost::for_key("0000"), DeepLHost::Paid);
+        // The paid endpoint stays the default when there is no key hint.
+        assert_eq!(DeepLHost::default(), DeepLHost::Paid);
     }
 
     #[test]

@@ -140,6 +140,9 @@ def _response(
         "source": source_iso,
         "source_confidence": round(float(detection.confidence) if detection else 1.0, 3),
         "detected": bool(detection and not detection.used_default),
+        # Low confidence or an unknown label: `source` is the configured
+        # default, not a detection. The client must say "assumed".
+        "fallback": bool(detection and detection.used_default),
         "unchanged": unchanged,
     }
 

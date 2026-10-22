@@ -208,12 +208,17 @@ pub fn from_locale_value(value: &str) -> Option<&'static LangInfo> {
     find(&language)
 }
 
-/// Tesseract's `-l` value for all supported source languages, in a stable
-/// order. `eng` comes first because tesseract weights the first language.
+/// Tesseract's `-l` value for all supported source languages. `eng` comes first
+/// because Tesseract weights the first language; the rest is sorted for a
+/// stable list.
 pub fn all_ocr_languages() -> String {
     let mut names: Vec<&str> = LANGS.iter().map(|info| info.tesseract).collect();
     names.sort_unstable();
     names.dedup();
+    if let Some(position) = names.iter().position(|name| *name == "eng") {
+        let english = names.remove(position);
+        names.insert(0, english);
+    }
     names.join("+")
 }
 
@@ -259,6 +264,14 @@ mod tests {
         unique.dedup();
         assert_eq!(parts.len(), unique.len(), "{list}");
         assert!(list.contains("eng") && list.contains("chi_tra"));
+    }
+
+    #[test]
+    fn english_is_the_primary_ocr_language() {
+        // Tesseract weighs the first `-l` entry; sorting alphabetically made
+        // Arabic the primary language and degraded English captures.
+        let list = all_ocr_languages();
+        assert!(list.starts_with("eng+"), "{list}");
     }
 
     #[test]

@@ -120,6 +120,12 @@ async fn run(args: Args) -> Result<(), String> {
         Some(requested) => Some(resolve_source_language(requested)?),
         None => None,
     };
+    // Validate the preview window's initial target here too: an invalid value
+    // must not cost a portal capture and print a path first.
+    let gui_target = match &args.target_language {
+        Some(requested) => Some(resolve_language(requested)?),
+        None => None,
+    };
     let translation = match &args.translate {
         Some(requested) => {
             let info = resolve_language(requested)?;
@@ -162,13 +168,9 @@ async fn run(args: Args) -> Result<(), String> {
         let outcome = pipeline::run(&job, translator.as_ref()).map_err(|e| e.to_string())?;
         println!("{}", outcome.output.display());
         if args.notify {
-            let source = outcome
-                .detected_source
-                .map(|lang| lang.english_name().to_string())
-                .unwrap_or_else(|| "the source language".to_string());
             let body = format!(
                 "{} → {} · {} line(s) · {}",
-                source,
+                outcome.source_label(),
                 info.name,
                 outcome.report.drawn,
                 outcome.output.display()
@@ -182,8 +184,8 @@ async fn run(args: Args) -> Result<(), String> {
 
     #[cfg(feature = "gui")]
     if !args.no_gui && args.interactive {
-        let initial = match &args.target_language {
-            Some(requested) => resolve_language(requested)?,
+        let initial = match gui_target {
+            Some(info) => info,
             None => lang::from_locale()
                 .unwrap_or_else(|| lang::find("en").expect("the language table contains English")),
         };

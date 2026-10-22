@@ -157,6 +157,23 @@ fn an_explicit_source_reaches_the_engine() {
 }
 
 #[test]
+fn an_assumed_source_is_flagged_for_the_ui() {
+    let mut canvas = capture();
+    let translator = FakeTranslator::new("[de] ").assuming_the_default_source();
+    let applied = pipeline::apply(
+        &mut canvas,
+        &blocks(),
+        Lang::parse("de").unwrap(),
+        None,
+        &translator,
+        &Options::default(),
+    )
+    .expect("pipeline succeeds");
+    assert!(applied.source_assumed);
+    assert_eq!(applied.detected_source.map(Lang::code), Some("en"));
+}
+
+#[test]
 fn detects_the_target_language_from_its_code() {
     let mut canvas = capture();
     let mut translator = FakeTranslator::new("[fr] ");

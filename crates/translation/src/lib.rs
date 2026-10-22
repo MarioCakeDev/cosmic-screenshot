@@ -177,6 +177,10 @@ pub struct Translated {
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Batch {
     pub items: Vec<Translated>,
+    /// True when the engine could not confidently detect the source and used
+    /// its default instead. The UI must say "assumed", not present it as a
+    /// detection.
+    pub source_assumed: bool,
 }
 
 impl Batch {
@@ -448,7 +452,9 @@ mod tests {
                     detected_source: None,
                 },
             ],
+            source_assumed: false,
         };
         assert_eq!(batch.detected_source().map(Lang::code), Some("de"));
+        assert!(!batch.source_assumed);
     }
 }

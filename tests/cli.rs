@@ -149,6 +149,35 @@ fn an_unknown_source_language_is_rejected_before_the_capture() {
 }
 
 #[test]
+fn an_unknown_preview_target_is_rejected_before_the_capture() {
+    let directory = tempfile::tempdir().expect("tempdir");
+    let image = sample_image(directory.path());
+
+    let output = command()
+        .args([
+            "--input",
+            image.to_str().unwrap(),
+            "--target-language",
+            "klingon",
+            "--no-gui",
+        ])
+        .output()
+        .expect("run the binary");
+
+    assert_eq!(output.status.code(), Some(1));
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("unsupported target language 'klingon'"),
+        "{stderr}"
+    );
+    assert_eq!(stderr.lines().count(), 1, "{stderr}");
+    assert!(
+        String::from_utf8_lossy(&output.stdout).trim().is_empty(),
+        "the capture path must not be printed before an invalid target is rejected"
+    );
+}
+
+#[test]
 fn an_unknown_provider_is_one_line() {
     let directory = tempfile::tempdir().expect("tempdir");
     let image = sample_image(directory.path());

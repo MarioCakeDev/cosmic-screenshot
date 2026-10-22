@@ -46,7 +46,7 @@ translated overlay, not the original text.
 | `COSMIC_SCREENSHOT_NLLB_URL` | `http://127.0.0.1:8765` | local sidecar base URL |
 | `COSMIC_SCREENSHOT_NLLB_TIMEOUT_SECS` | `30` | sidecar HTTP timeout |
 | `DEEPL_API_KEY` | — | only for `TRANSLATE_PROVIDER=deepl` |
-| `DEEPL_HOST` | `paid` | `paid` (`api.deepl.com`), `free` (legacy accounts), or a full URL |
+| `DEEPL_HOST` | `paid` | `paid` (`api.deepl.com`), `free` (a trailing `:fx` on the key selects it automatically), or a full URL |
 | `COSMIC_SCREENSHOT_OCR_LANGS` | all supported packs | Tesseract `-l` list |
 
 With the sidecar stopped, the Translate button and `--translate` fail with one
@@ -101,7 +101,7 @@ cosmic-screenshot-translate --input shot.png --translate de
 ## Tests
 
 ```sh
-cargo test --workspace            # 87 tests, no network, no model, no key
+cargo test --workspace            # 94 tests, no network, no model, no key
 cargo test --workspace --all-features
 cd sidecar && python -m pytest    # engine tests with fixtures (no model)
 

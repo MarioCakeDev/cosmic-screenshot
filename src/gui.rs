@@ -234,10 +234,7 @@ async fn translate(
     let outcome = pipeline::run(&job, translator.as_ref()).map_err(|error| error.to_string())?;
     let canvas = Canvas::open(&outcome.output).map_err(|error| error.to_string())?;
     let handle = image::Handle::from_rgba(canvas.width, canvas.height, canvas.rgba);
-    let source = outcome
-        .detected_source
-        .map(|source| source.english_name().to_string())
-        .unwrap_or_else(|| "detected language".to_string());
+    let source = outcome.source_label();
     let status = format!(
         "{} → {} · {} line(s) · saved to {}",
         source,

@@ -61,7 +61,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     )
     parser.add_argument(
         "--min-confidence", type=float, default=None,
-        help="fastText confidence below which the default source is used",
+        help="fastText confidence below which the default source is used "
+             "(default: NLLB_MIN_CONFIDENCE or the table's value)",
     )
     parser.add_argument(
         "--no-detect", action="store_true",
@@ -83,16 +84,34 @@ def main(argv: list[str] | None = None) -> int:
         return EX_CONFIG
 
 
+def min_confidence_from(flag_value: float | None, environ=os.environ) -> float | None:
+    """`--min-confidence` wins over `NLLB_MIN_CONFIDENCE`; both are validated."""
+    if flag_value is not None:
+        value = flag_value
+    else:
+        raw = (environ.get("NLLB_MIN_CONFIDENCE") or "").strip()
+        if not raw:
+            return None
+        try:
+            value = float(raw)
+        except ValueError as error:
+            raise LanguageTableError(
+                f"NLLB_MIN_CONFIDENCE='{raw}' is not a number"
+            ) from error
+    if not 0.0 <= value <= 1.0:
+        raise LanguageTableError("min-confidence must be between 0 and 1")
+    return value
+
+
 def _run(args: argparse.Namespace) -> int:
     table = LanguageTable.load(args.lang_table)
     if args.default_source:
         source = args.default_source.strip().lower()
         table.require(source)
         table = LanguageTable(table.languages, source, table.min_confidence)
-    if args.min_confidence is not None:
-        if not 0.0 <= args.min_confidence <= 1.0:
-            raise LanguageTableError("--min-confidence must be between 0 and 1")
-        table = LanguageTable(table.languages, table.default_source, args.min_confidence)
+    confidence = min_confidence_from(args.min_confidence)
+    if confidence is not None:
+        table = LanguageTable(table.languages, table.default_source, confidence)
 
     engine = NllbEngine(
         args.model_dir,
