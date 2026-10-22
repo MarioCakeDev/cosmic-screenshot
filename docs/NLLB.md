@@ -148,10 +148,15 @@ python -m pytest -m real
 
 ```json
 {"translations": ["Delivery takes place", "within three working days."],
- "source": "de", "source_confidence": 0.995, "detected": true, "unchanged": false}
+ "source": "de", "source_confidence": 0.995,
+ "detected": true, "fallback": false, "unchanged": false}
 ```
 
 - `source` is `"auto"` (detect) or a two-letter code.
+- `detected` is true when a confidence-bearing detection produced `source`;
+  `fallback` is true when detection was not trusted and `source` is the
+  configured default instead. They are never both true, and an explicit
+  `source` sets both to false.
 - The wire carries **ISO 639-1**, not NLLB tokens. The token (`deu_Latn`) is
   resolved inside the sidecar from one table, so a wrong code is a 400 and can
   never silently translate into another language.
@@ -196,9 +201,11 @@ NLLB has no detector — this is work DeepL used to do for free. fastText
 `lid.176.ftz` runs **once per capture**, on all OCR lines joined together:
 single short lines are ambiguous. Below the confidence threshold (`0.4`) or on a
 label the table does not know, the sidecar falls back to English and reports
-`"detected": false`, which the UI shows as the source language rather than
-pretending. `--source-lang de` and the preview window's **From** picker skip
-detection entirely.
+`"detected": false` with `"fallback": true`; the notification and the preview
+status then say **English (assumed)** rather than presenting it as a detection.
+`--source-lang de` and the preview window's **From** picker skip detection
+entirely (`detected` and `fallback` are both false, and the chosen language is
+shown as the source).
 
 ## Environment variables (sidecar)
 

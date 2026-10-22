@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from nllb_sidecar.detect import FixedDetector
+from nllb_sidecar.detect import DefaultDetector, FixedDetector
 from nllb_sidecar.engine import EngineError
 from nllb_sidecar.languages import LanguageTable
 from nllb_sidecar.server import BadRequest, Sidecar, serve
@@ -71,6 +71,30 @@ def test_auto_is_the_default_source(table):
     body = sidecar(table, engine).translate({"lines": ["Hallo"], "target": "en", "source": "auto"})
     assert body["source"] == "de"
     assert engine.calls[0][2] == "deu_Latn"
+
+
+def test_a_trusted_detection_is_not_flagged_as_fallback(table):
+    body = sidecar(table).translate({"lines": ["Hallo"], "target": "en"})
+    assert body["detected"] is True
+    assert body["fallback"] is False
+
+
+def test_a_low_confidence_fallback_is_flagged(table):
+    engine = FakeEngine()
+    body = sidecar(table, engine, DefaultDetector(table)).translate(
+        {"lines": ["Hallo"], "target": "de"}
+    )
+    assert body["source"] == table.default_source
+    assert body["detected"] is False
+    assert body["fallback"] is True, "the client needs this to say 'assumed'"
+    assert engine.calls[0][2] == "eng_Latn"
+
+
+def test_an_explicit_source_is_neither_detected_nor_fallback(table):
+    body = sidecar(table).translate({"lines": ["Hallo"], "target": "en", "source": "de"})
+    assert body["detected"] is False
+    assert body["fallback"] is False
+    assert body["source"] == "de"
 
 
 def test_text_already_in_the_target_language_is_unchanged(table):

@@ -44,7 +44,7 @@ impl DeepLHost {
         }
     }
 
-    /// `DEEPL_HOST` accepts `paid` (default), `free` (legacy accounts), a bare
+    /// `DEEPL_HOST` accepts `paid` (default), `free` (API Free, `:fx` keys), a bare
     /// hostname, or a full base URL (the latter matters for proxies and tests).
     pub fn parse(value: &str) -> Result<Self, TranslateError> {
         let trimmed = value.trim().trim_end_matches('/');
@@ -61,7 +61,7 @@ impl DeepLHost {
             _ => Err(TranslateError::BadConfig {
                 variable: HOST_VARIABLE,
                 value: value.to_string(),
-                hint: "use 'paid' (default), 'free' (legacy), or a full base URL such as https://api.deepl.com",
+                hint: "use 'paid' (default), 'free' (API Free, :fx keys), or a full base URL such as https://api.deepl.com",
             }),
         }
     }
