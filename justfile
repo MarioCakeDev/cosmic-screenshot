@@ -1,4 +1,4 @@
-name := 'cosmic-screenshot'
+name := 'cosmic-screenshot-translate'
 export APPID := 'com.system76.CosmicScreenshot'
 
 rootdir := ''
@@ -12,7 +12,7 @@ cargo-target-dir := env('CARGO_TARGET_DIR', 'target')
 bin-src := cargo-target-dir / 'release' / name
 bin-dst := base-dir / 'bin' / name
 
-desktop := APPID + '.desktop'
+desktop := name + '.desktop'
 desktop-src := 'resources' / desktop
 desktop-dest := clean(rootdir / prefix) / 'share' / 'applications' / desktop
 

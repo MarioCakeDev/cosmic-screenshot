@@ -6,3 +6,11 @@
 /target/
 /vendor.tar
 /vendor/
+
+# Python sidecar
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+/sidecar/build/
+/sidecar/*.egg-info/
